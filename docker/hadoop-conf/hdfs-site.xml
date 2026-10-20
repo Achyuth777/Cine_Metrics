@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!-- hdfs-site.xml — HDFS Configuration for CineMetrics -->
+<configuration>
+    <!-- Single-node: replication factor of 1 -->
+    <property>
+        <name>dfs.replication</name>
+        <value>1</value>
+    </property>
+    <!-- NameNode storage directory -->
+    <property>
+        <name>dfs.namenode.name.dir</name>
+        <value>/hadoop-data/namenode</value>
+    </property>
+    <!-- DataNode storage directory -->
+    <property>
+        <name>dfs.datanode.data.dir</name>
+        <value>/hadoop-data/datanode</value>
+    </property>
+    <!-- Allow web UI access -->
+    <property>
+        <name>dfs.namenode.http-address</name>
+        <value>0.0.0.0:9870</value>
+    </property>
+</configuration>

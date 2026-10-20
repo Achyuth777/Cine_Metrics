@@ -1,0 +1,100 @@
+##############################################################################
+# CineMetrics — Docker Compose Configuration
+# ============================================
+# Spins up a single-node Hadoop cluster (HDFS + YARN + MapReduce) along with
+# the CineMetrics backend and frontend services.
+#
+# Usage:
+#   docker-compose up -d              # Start all services
+#   docker-compose up -d hadoop       # Start only Hadoop
+#   docker-compose logs -f hadoop     # Watch Hadoop logs
+#   docker-compose down               # Tear down
+#
+# Developer: Achyuth PV
+# Course: Big Data Essentials (21CSC314P), SRM Ramapuram
+##############################################################################
+
+version: '3.8'
+
+services:
+  # =========================================================================
+  # Apache Hadoop — Single-node pseudo-distributed cluster
+  # Runs NameNode, DataNode, ResourceManager, NodeManager, and HistoryServer
+  # =========================================================================
+  hadoop:
+    image: apache/hadoop:3.3.6
+    container_name: cinemetrics-hadoop
+    hostname: hadoop
+    ports:
+      - "9870:9870"     # HDFS NameNode Web UI
+      - "9864:9864"     # HDFS DataNode Web UI
+      - "8088:8088"     # YARN ResourceManager Web UI
+      - "19888:19888"   # MapReduce History Server
+      - "8042:8042"     # YARN NodeManager
+    environment:
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+      # Limit memory usage for student machines
+      HADOOP_HEAPSIZE_MAX: 1024
+      YARN_NODEMANAGER_HEAPSIZE: 512
+    volumes:
+      - ./docker/hadoop-conf:/opt/hadoop/etc/hadoop
+      - ./docker/hadoop-data:/hadoop-data
+      - ./data:/data
+      - ./hadoop/target:/opt/cinemetrics
+    command: >
+      bash -c "
+        hdfs namenode -format -nonInteractive 2>/dev/null;
+        start-dfs.sh;
+        start-yarn.sh;
+        mapred --daemon start historyserver;
+        echo '=== Hadoop cluster is ready ===';
+        tail -f /dev/null
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # =========================================================================
+  # CineMetrics Backend — FastAPI application
+  # =========================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cinemetrics-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./backend:/app/src
+    environment:
+      - DATA_DIR=/app/data/processed
+      - RAW_DATA_DIR=/app/data/raw/ml-latest-small
+      - OUTPUT_DIR=/app/data/output
+      - HADOOP_NAMENODE_URL=http://hadoop:9870
+      - HADOOP_YARN_URL=http://hadoop:8088
+    depends_on:
+      hadoop:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # =========================================================================
+  # CineMetrics Frontend — React dashboard (dev mode)
+  # =========================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cinemetrics-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    command: npm run dev -- --host

@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CineMetrics MapReduce - Maven Build Configuration
+  ==================================================
+  This POM file configures the build for our Hadoop MapReduce analytics jobs.
+  
+  Key points for students:
+  - Hadoop dependencies are "provided" scope because they exist on the cluster
+  - The shade plugin creates an "uber JAR" containing all our code + dependencies
+  - We target Java 17 for modern language features
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Project coordinates - uniquely identify this project in Maven ecosystem -->
+    <groupId>com.cinemetrics</groupId>
+    <artifactId>cinemetrics-mapreduce</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>CineMetrics MapReduce</name>
+    <description>
+        Big Data analytics on movie ratings using Hadoop MapReduce.
+        Processes MovieLens dataset to compute average ratings, genre popularity,
+        rating trends, and hidden gem discovery.
+    </description>
+
+    <!-- Centralize version numbers so they're easy to update -->
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <hadoop.version>3.3.6</hadoop.version>
+        <java.version>17</java.version>
+    </properties>
+
+    <dependencies>
+        <!--
+          Hadoop Common: Core utilities, configuration, filesystem abstractions.
+          "provided" scope means Hadoop supplies this at runtime on the cluster.
+        -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!--
+          MapReduce Client Core: The Mapper, Reducer, Job APIs we extend.
+        -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-mapreduce-client-core</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!--
+          MapReduce Job Client: Needed for submitting jobs to the cluster.
+        -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-mapreduce-client-jobclient</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!--
+          JUnit 4: Our testing framework for unit tests.
+        -->
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+              Maven Compiler Plugin: Compiles our Java source code.
+              We target Java 17 for modern features like text blocks and records.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                </configuration>
+            </plugin>
+
+            <!--
+              Maven JAR Plugin: Packages compiled classes into a JAR.
+              Sets the Main-Class so we can run: hadoop jar cinemetrics.jar
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.cinemetrics.mapreduce.CineMetricsDriver</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <!--
+              Maven Shade Plugin: Creates an "uber JAR" (fat JAR) that bundles
+              all non-provided dependencies into a single JAR file.
+              This is essential for Hadoop because we need a self-contained JAR
+              that can be distributed to all nodes in the cluster.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.cinemetrics.mapreduce.CineMetricsDriver</mainClass>
+                                </transformer>
+                            </transformers>
+                            <!-- Reduce JAR size by excluding unnecessary files -->
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

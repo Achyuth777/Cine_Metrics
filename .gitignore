@@ -1,0 +1,52 @@
+# Java
+hadoop/target/
+*.class
+*.jar
+!hadoop/lib/*.jar
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+backend/env/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/build/
+.next/
+
+# Data - don't commit large datasets
+data/raw/ml-latest-small.zip
+data/raw/ml-latest-small/
+data/raw/ml-32m/
+data/output/
+data/processed/*.json
+!data/processed/.gitkeep
+
+# Docker
+docker/hadoop-data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.production

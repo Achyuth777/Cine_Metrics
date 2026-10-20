@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CineMetrics — Movie Ratings Analysis Using Hadoop MapReduce</title>
+  <!-- Tailwind CSS via official CDN -->
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-card: #161622;
+      --bg-card-hover: #1e1e30;
+      --border-color: #252538;
+      --text-primary: #f1f1f8;
+      --text-secondary: #9aa0b8;
+      --accent-violet: #8b5cf6;
+      --accent-indigo: #6366f1;
+    }
+    body {
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scroll::-webkit-scrollbar-track { background: #0a0a0f; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #252538; border-radius: 3px; }
+    .custom-scroll::-webkit-scrollbar-thumb:hover { background: #3b3b58; }
+  </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col">
+
+  <!-- Top Navigation & Branding Bar -->
+  <header class="sticky top-0 z-50 bg-[#0a0a0f]/90 backdrop-blur-md border-b border-[#252538] px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-blue-500 flex items-center justify-center shadow-lg shadow-violet-500/20">
+        <span class="text-white font-bold text-lg">★</span>
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+          CineMetrics
+          <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+            Hadoop MapReduce 3.3.6
+          </span>
+        </h1>
+        <p class="text-[11px] text-[#9aa0b8]">Movie Intelligence & Ratings Analytics • SRM IST Ramapuram (21CSC314P) • Achyuth PV</p>
+      </div>
+    </div>
+
+    <!-- Mode Badge -->
+    <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono font-semibold">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span>Direct Web Preview Mode (Ready)</span>
+    </div>
+  </header>
+
+  <!-- Main App Layout with Sidebar and Content -->
+  <div class="flex-1 flex overflow-hidden">
+    <!-- Sidebar Navigation -->
+    <aside class="w-64 bg-[#12121a] border-r border-[#252538] p-4 flex flex-col justify-between shrink-0">
+      <nav class="space-y-1 text-xs font-semibold" id="navContainer">
+        <button onclick="switchTab('overview')" class="nav-btn active w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-violet-300 bg-violet-600/15 border border-violet-500/30">
+          <span>📊</span> Overview & KPIs
+        </button>
+        <button onclick="switchTab('movies')" class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-[#9aa0b8] hover:text-white hover:bg-[#1a1a2e]">
+          <span>🎬</span> Movie Explorer
+        </button>
+        <button onclick="switchTab('genres')" class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-[#9aa0b8] hover:text-white hover:bg-[#1a1a2e]">
+          <span>🏷️</span> Genre Popularity
+        </button>
+        <button onclick="switchTab('ratings')" class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-[#9aa0b8] hover:text-white hover:bg-[#1a1a2e]">
+          <span>📈</span> Rating Intelligence
+        </button>
+        <button onclick="switchTab('hadoop')" class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-[#9aa0b8] hover:text-white hover:bg-[#1a1a2e]">
+          <span>🖥️</span> Hadoop Job Monitor
+        </button>
+        <button onclick="switchTab('architecture')" class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-[#9aa0b8] hover:text-white hover:bg-[#1a1a2e]">
+          <span>🎓</span> Architecture & Viva Q&A
+        </button>
+      </nav>
+
+      <div class="rounded-xl bg-[#161622] border border-[#252538] p-3 text-[11px] text-[#9aa0b8] space-y-1">
+        <p class="font-bold text-white">SRM Ramapuram</p>
+        <p>Big Data Essentials (21CSC314P)</p>
+        <p class="text-violet-400 font-semibold">Dev: Achyuth PV</p>
+      </div>
+    </aside>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 overflow-y-auto p-6 custom-scroll" id="contentArea">
+
+      <!-- ================= TAB 1: OVERVIEW ================= -->
+      <section id="tab-overview" class="space-y-6 max-w-7xl mx-auto">
+        <div class="flex items-center justify-between pb-2 border-b border-[#252538]">
+          <div>
+            <h2 class="text-xl font-bold text-white">Platform Intelligence Overview</h2>
+            <p class="text-xs text-[#9aa0b8] mt-0.5">Calculated across 100,836 ratings using Apache Hadoop MapReduce</p>
+          </div>
+          <span class="text-xs font-mono px-3 py-1 rounded bg-violet-600/20 text-violet-300 border border-violet-500/30">
+            MovieLens Latest-Small
+          </span>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          <div class="rounded-xl bg-[#161622] border border-violet-500/20 p-4 shadow-lg">
+            <span class="text-[11px] uppercase font-bold text-[#646a84]">Total Movies</span>
+            <p class="text-2xl font-bold font-mono text-white mt-1">9,742</p>
+            <p class="text-xs text-[#9aa0b8] mt-1">Unique titles in HDFS</p>
+          </div>
+
+          <div class="rounded-xl bg-[#161622] border border-blue-500/20 p-4 shadow-lg">
+            <span class="text-[11px] uppercase font-bold text-[#646a84]">Total Ratings</span>
+            <p class="text-2xl font-bold font-mono text-white mt-1">100,836</p>
+            <p class="text-xs text-[#9aa0b8] mt-1">Mapped & reduced</p>
+          </div>
+
+          <div class="rounded-xl bg-[#161622] border border-indigo-500/20 p-4 shadow-lg">
+            <span class="text-[11px] uppercase font-bold text-[#646a84]">Unique Users</span>
+            <p class="text-2xl font-bold font-mono text-white mt-1">610</p>
+            <p class="text-xs text-[#9aa0b8] mt-1">Active reviewers</p>
+          </div>
+
+          <div class="rounded-xl bg-[#161622] border border-amber-500/20 p-4 shadow-lg">
+            <span class="text-[11px] uppercase font-bold text-[#646a84]">Global Mean</span>
+            <p class="text-2xl font-bold font-mono text-amber-400 mt-1">3.50 ★</p>
+            <p class="text-xs text-[#9aa0b8] mt-1">Dataset average (C)</p>
+          </div>
+
+          <div class="rounded-xl bg-[#161622] border border-cyan-500/20 p-4 shadow-lg">
+            <span class="text-[11px] uppercase font-bold text-[#646a84]">Genres</span>
+            <p class="text-2xl font-bold font-mono text-cyan-300 mt-1">20</p>
+            <p class="text-xs text-[#9aa0b8] mt-1">Classified categories</p>
+          </div>
+
+          <div class="rounded-xl bg-[#161622] border border-emerald-500/20 p-4 shadow-lg">
+            <span class="text-[11px] uppercase font-bold text-[#646a84]">Top Gem</span>
+            <p class="text-xl font-bold font-mono text-emerald-400 mt-1">4.59 ★</p>
+            <p class="text-xs text-[#9aa0b8] truncate mt-1">Secrets & Lies (1996)</p>
+          </div>
+        </div>
+
+        <!-- Rating Distribution Histogram & Top 10 Most Rated -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div class="lg:col-span-7 rounded-xl bg-[#161622] border border-[#252538] p-5 shadow-xl space-y-4">
+            <div>
+              <h3 class="text-sm font-bold text-white">Rating Distribution Histogram (Job 3: RatingDistributionJob)</h3>
+              <p class="text-xs text-[#9aa0b8]">Frequency counts aggregated across 10 half-star intervals</p>
+            </div>
+
+            <!-- CSS Bar Histogram -->
+            <div class="space-y-2 pt-2" id="distributionBars">
+              <!-- Rendered via JS -->
+            </div>
+            <p class="text-[11px] text-[#646a84] text-right font-mono">Mode: 4.0 Stars (26,818 votes = 26.6% of catalogue)</p>
+          </div>
+
+          <div class="lg:col-span-5 rounded-xl bg-[#161622] border border-[#252538] p-5 shadow-xl space-y-3">
+            <div>
+              <h3 class="text-sm font-bold text-white">Top 10 Most Rated Movies (Job 2: MostRatedJob)</h3>
+              <p class="text-xs text-[#9aa0b8]">Titles with highest audience participation volume</p>
+            </div>
+
+            <div class="space-y-2" id="topRatedList">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ================= TAB 2: MOVIE EXPLORER ================= -->
+      <section id="tab-movies" class="hidden space-y-6 max-w-7xl mx-auto">
+        <div class="flex items-center justify-between pb-2 border-b border-[#252538]">
+          <div>
+            <h2 class="text-xl font-bold text-white">Movie Catalogue & Intelligence Explorer</h2>
+            <p class="text-xs text-[#9aa0b8] mt-0.5">Search and filter 9,742 movie records processed via MapReduce</p>
+          </div>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="rounded-xl bg-[#161622] border border-[#252538] p-4 grid grid-cols-1 md:grid-cols-12 gap-3">
+          <div class="md:col-span-5">
+            <input type="text" id="movieSearch" oninput="filterMovies()" placeholder="Search title or year (e.g. Matrix, 1999)..."
+                   class="w-full px-3 py-2 bg-[#0d0d14] border border-[#252538] rounded-lg text-xs text-white placeholder-[#646a84] focus:outline-none focus:border-violet-500">
+          </div>
+
+          <div class="md:col-span-4">
+            <select id="genreFilter" onchange="filterMovies()"
+                    class="w-full px-3 py-2 bg-[#0d0d14] border border-[#252538] rounded-lg text-xs text-white focus:outline-none focus:border-violet-500">
+              <option value="">All Genres</option>
+              <option value="Action">Action</option>
+              <option value="Adventure">Adventure</option>
+              <option value="Comedy">Comedy</option>
+              <option value="Crime">Crime</option>
+              <option value="Drama">Drama</option>
+              <option value="Sci-Fi">Sci-Fi</option>
+              <option value="Thriller">Thriller</option>
+              <option value="Animation">Animation</option>
+            </select>
+          </div>
+
+          <div class="md:col-span-3">
+            <select id="sortBy" onchange="filterMovies()"
+                    class="w-full px-3 py-2 bg-[#0d0d14] border border-[#252538] rounded-lg text-xs text-white focus:outline-none focus:border-violet-500">
+              <option value="weighted">Bayesian Weighted Score</option>
+              <option value="votes">Rating Count (Popularity)</option>
+              <option value="avg">Raw Average Rating</option>
+              <option value="title">Movie Title</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Movies Table -->
+        <div class="rounded-xl bg-[#161622] border border-[#252538] overflow-hidden shadow-xl">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs text-[#9aa0b8]">
+              <thead class="bg-[#0d0d14] text-[11px] uppercase tracking-wider text-[#646a84] border-b border-[#252538]">
+                <tr>
+                  <th class="py-3 px-4">Movie Title</th>
+                  <th class="py-3 px-3">Year</th>
+                  <th class="py-3 px-3">Genres</th>
+                  <th class="py-3 px-3 text-right">Avg (★)</th>
+                  <th class="py-3 px-3 text-right">Votes</th>
+                  <th class="py-3 px-4 text-right">Bayesian Score</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#252538]" id="moviesTableBody">
+                <!-- Rendered via JS -->
+              </tbody>
+            </table>
+          </div>
+          <div class="p-3 bg-[#0d0d14] border-t border-[#252538] text-xs text-[#646a84] flex items-center justify-between" id="movieTableFooter">
+            <span>Showing filtered results</span>
+            <span class="font-mono text-white">9,742 Total Titles</span>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ================= TAB 3: GENRE POPULARITY ================= -->
+      <section id="tab-genres" class="hidden space-y-6 max-w-7xl mx-auto">
+        <div class="flex items-center justify-between pb-2 border-b border-[#252538]">
+          <div>
+            <h2 class="text-xl font-bold text-white">Genre Analytics & Map-Side Join (Job 4)</h2>
+            <p class="text-xs text-[#9aa0b8] mt-0.5">Evaluating rating volume against critical reception using DistributedCache</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6" id="genreVisualizer">
+          <!-- Rendered via JS -->
+        </div>
+
+        <!-- Genre Table -->
+        <div class="rounded-xl bg-[#161622] border border-[#252538] overflow-hidden shadow-xl">
+          <div class="p-4 bg-[#0d0d14] border-b border-[#252538]">
+            <h3 class="text-sm font-bold text-white">Full Genre Aggregations (Job 4 Output)</h3>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs text-[#9aa0b8]">
+              <thead class="bg-[#0d0d14]/60 text-[11px] uppercase tracking-wider text-[#646a84] border-b border-[#252538]">
+                <tr>
+                  <th class="py-3 px-4">Genre</th>
+                  <th class="py-3 px-3 text-right">Movie Count</th>
+                  <th class="py-3 px-3 text-right">Total Ratings</th>
+                  <th class="py-3 px-4 text-right">Average Rating</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#252538]" id="genreTableBody">
+                <!-- Rendered via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ================= TAB 4: RATING INTELLIGENCE ================= -->
+      <section id="tab-ratings" class="hidden space-y-6 max-w-7xl mx-auto">
+        <div class="flex items-center justify-between pb-2 border-b border-[#252538]">
+          <div>
+            <h2 class="text-xl font-bold text-white">Rating Intelligence & Hidden Gems (Jobs 5, 6, 7)</h2>
+            <p class="text-xs text-[#9aa0b8] mt-0.5">Decade perceptions, timestamp tracking, and Bayesian discovery</p>
+          </div>
+        </div>
+
+        <!-- Academic Note -->
+        <div class="rounded-xl bg-indigo-950/20 border border-indigo-500/30 p-4 text-xs text-[#9aa0b8]">
+          <strong class="text-white">Exam Distinction:</strong>
+          <span class="text-violet-300"> Movie Release Year (Job 5)</span> measures film production era (1920–2020), while
+          <span class="text-indigo-300"> Review Timestamp (Job 7)</span> captures when reviewers submitted evaluations (1996–2018).
+        </div>
+
+        <!-- Hidden Gems Table -->
+        <div class="rounded-xl bg-[#161622] border border-[#252538] overflow-hidden shadow-xl">
+          <div class="p-4 bg-[#0d0d14] border-b border-[#252538] flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-bold text-white">Discovered Hidden Gems (Job 6: HiddenGemsJob)</h3>
+              <p class="text-xs text-[#9aa0b8]">High ratings (≥ 4.0 ★) with moderate votes (5–50) damped via Bayesian formula</p>
+            </div>
+            <span class="px-2.5 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-mono font-bold">
+              355 Gems Verified
+            </span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs text-[#9aa0b8]">
+              <thead class="bg-[#0d0d14]/60 text-[11px] uppercase tracking-wider text-[#646a84] border-b border-[#252538]">
+                <tr>
+                  <th class="py-3 px-4">Rank & Title</th>
+                  <th class="py-3 px-3">Genres</th>
+                  <th class="py-3 px-3 text-right">Avg Rating</th>
+                  <th class="py-3 px-3 text-right">Votes</th>
+                  <th class="py-3 px-4 text-right">Bayesian Weighted Score</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#252538]" id="gemsTableBody">
+                <!-- Rendered via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ================= TAB 5: HADOOP MONITOR ================= -->
+      <section id="tab-hadoop" class="hidden space-y-6 max-w-7xl mx-auto">
+        <div class="flex items-center justify-between pb-2 border-b border-[#252538]">
+          <div>
+            <h2 class="text-xl font-bold text-white">Hadoop Cluster & MapReduce Job Monitor</h2>
+            <p class="text-xs text-[#9aa0b8] mt-0.5">Real cluster connection statuses and partition output registry</p>
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-emerald-950/20 border border-emerald-500/30 p-4 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></div>
+            <div>
+              <h4 class="text-sm font-bold text-white">MapReduce Pipeline Execution Succeeded</h4>
+              <p class="text-xs text-[#9aa0b8]">7 out of 7 jobs executed and partitions written to HDFS/disk storage</p>
+            </div>
+          </div>
+          <span class="text-xs font-mono text-emerald-400 font-bold">STATUS: OK</span>
+        </div>
+
+        <!-- 7 Job Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="hadoopJobCards">
+          <!-- Rendered via JS -->
+        </div>
+      </section>
+
+
+      <!-- ================= TAB 6: ARCHITECTURE & VIVA ================= -->
+      <section id="tab-architecture" class="hidden space-y-8 max-w-7xl mx-auto">
+        <div class="pb-2 border-b border-[#252538]">
+          <h2 class="text-xl font-bold text-white">System Architecture & Viva Examination Guide</h2>
+          <p class="text-xs text-[#9aa0b8] mt-0.5">Comprehensive theoretical and algorithmic breakdown for SRM IST evaluation</p>
+        </div>
+
+        <!-- 8 Stage Pipeline Visualizer -->
+        <div class="rounded-xl bg-[#161622] border border-[#252538] p-5 shadow-xl space-y-4">
+          <h3 class="text-sm font-bold text-white">End-to-End 8-Stage MapReduce Pipeline</h3>
+          <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2" id="pipelineCards">
+            <!-- Rendered via JS -->
+          </div>
+        </div>
+
+        <!-- Worked Numerical Example -->
+        <div class="rounded-xl bg-[#161622] border border-[#252538] p-5 shadow-xl space-y-4">
+          <h3 class="text-sm font-bold text-white">Worked Numerical Example (5 Movie Ratings)</h3>
+          <p class="text-xs text-[#9aa0b8]">Mathematical demonstration of Mapper $\to$ Combiner $\to$ Shuffle & Sort $\to$ Reducer</p>
+          <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs font-mono">
+            <div class="p-3 rounded-lg bg-[#0d0d14] border border-[#252538] space-y-1">
+              <span class="text-[10px] text-[#646a84] font-bold uppercase block">1. Input CSV</span>
+              <p>M1, 4.0 ★</p>
+              <p>M1, 5.0 ★</p>
+              <p>M2, 3.0 ★</p>
+              <p>M1, 4.5 ★</p>
+              <p>M2, 4.0 ★</p>
+            </div>
+            <div class="p-3 rounded-lg bg-[#0d0d14] border border-[#252538] space-y-1 text-violet-300">
+              <span class="text-[10px] text-violet-400 font-bold uppercase block">2. Mapper Emits</span>
+              <p>1 → (4.0, 1)</p>
+              <p>1 → (5.0, 1)</p>
+              <p>2 → (3.0, 1)</p>
+              <p>1 → (4.5, 1)</p>
+              <p>2 → (4.0, 1)</p>
+            </div>
+            <div class="p-3 rounded-lg bg-[#0d0d14] border border-[#252538] space-y-1 text-blue-300">
+              <span class="text-[10px] text-blue-400 font-bold uppercase block">3. Shuffle & Group</span>
+              <p>Key 1: [4.0, 5.0, 4.5]</p>
+              <p>Key 2: [3.0, 4.0]</p>
+            </div>
+            <div class="p-3 rounded-lg bg-[#0d0d14] border border-emerald-500/30 space-y-1 text-emerald-300">
+              <span class="text-[10px] text-emerald-400 font-bold uppercase block">4. Reducer Output</span>
+              <p>Movie 1: Avg 4.50 ★</p>
+              <p class="text-[10px] text-[#646a84]">Sum 13.5 / Count 3</p>
+              <p>Movie 2: Avg 3.50 ★</p>
+              <p class="text-[10px] text-[#646a84]">Sum 7.0 / Count 2</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 20 Viva Questions Accordion -->
+        <div class="rounded-xl bg-[#161622] border border-[#252538] p-5 shadow-xl space-y-3">
+          <h3 class="text-sm font-bold text-white">Top 20 Viva Questions & Detailed Answers</h3>
+          <p class="text-xs text-[#9aa0b8]">Click any question below to reveal the answer formulated for your viva examination:</p>
+          <div class="space-y-2 pt-2" id="vivaContainer">
+            <!-- Rendered via JS -->
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Embedded Real MapReduce Datasets (Client-Side) -->
+  <script>
+    const ratingDistribution = [
+      { rating: "0.5", count: 1370 },
+      { rating: "1.0", count: 2811 },
+      { rating: "1.5", count: 1791 },
+      { rating: "2.0", count: 7551 },
+      { rating: "2.5", count: 5550 },
+      { rating: "3.0", count: 20047 },
+      { rating: "3.5", count: 13136 },
+      { rating: "4.0", count: 26818 },
+      { rating: "4.5", count: 8551 },
+      { rating: "5.0", count: 13211 }
+    ];
+
+    const top10MostRated = [
+      { id: 356, title: "Forrest Gump (1994)", genres: "Comedy|Drama|Romance|War", count: 329, avg: 4.16 },
+      { id: 318, title: "Shawshank Redemption, The (1994)", genres: "Crime|Drama", count: 317, avg: 4.43 },
+      { id: 296, title: "Pulp Fiction (1994)", genres: "Comedy|Crime|Drama|Thriller", count: 307, avg: 4.20 },
+      { id: 593, title: "Silence of the Lambs, The (1991)", genres: "Crime|Horror|Thriller", count: 279, avg: 4.16 },
+      { id: 2571, title: "Matrix, The (1999)", genres: "Action|Sci-Fi|Thriller", count: 278, avg: 4.19 },
+      { id: 260, title: "Star Wars: Episode IV (1977)", genres: "Action|Adventure|Sci-Fi", count: 251, avg: 4.23 },
+      { id: 480, title: "Jurassic Park (1993)", genres: "Action|Adventure|Sci-Fi|Thriller", count: 238, avg: 3.75 },
+      { id: 110, title: "Braveheart (1995)", genres: "Action|Drama|War", count: 237, avg: 4.03 },
+      { id: 589, title: "Terminator 2: Judgment Day (1991)", genres: "Action|Sci-Fi", count: 224, avg: 3.97 },
+      { id: 527, title: "Schindler's List (1993)", genres: "Drama|War", count: 220, avg: 4.23 }
+    ];
+
+    const sampleMovies = [
+      ...top10MostRated.map(m => ({ ...m, year: parseInt(m.title.match(/\((\d{4})\)/)?.[1] || 1995), weighted: ((m.count / (m.count + 10)) * m.avg + (10 / (m.count + 10)) * 3.5016).toFixed(3) })),
+      { id: 1, title: "Toy Story (1995)", year: 1995, genres: "Adventure|Animation|Children|Comedy|Fantasy", count: 215, avg: 3.92, weighted: "3.901" },
+      { id: 2959, title: "Fight Club (1999)", year: 1999, genres: "Action|Crime|Drama|Thriller", count: 218, avg: 4.27, weighted: "4.236" },
+      { id: 50, title: "Usual Suspects, The (1995)", year: 1995, genres: "Crime|Mystery|Thriller", count: 204, avg: 4.24, weighted: "4.205" },
+      { id: 858, title: "Godfather, The (1972)", year: 1972, genres: "Crime|Drama", count: 192, avg: 4.29, weighted: "4.251" },
+      { id: 1041, title: "Secrets & Lies (1996)", year: 1996, genres: "Drama", count: 11, avg: 4.59, weighted: "4.072" },
+      { id: 1208, title: "Apocalypse Now (1979)", year: 1979, genres: "Action|Drama|War", count: 107, avg: 4.22, weighted: "4.159" },
+      { id: 1221, title: "Godfather: Part II, The (1974)", year: 1974, genres: "Crime|Drama", count: 129, avg: 4.26, weighted: "4.205" }
+    ];
+
+    const genresList = [
+      { genre: "Drama", movieCount: 4349, ratingCount: 41928, avgRating: 3.656 },
+      { genre: "Comedy", movieCount: 3753, ratingCount: 39053, avgRating: 3.385 },
+      { genre: "Action", movieCount: 1828, ratingCount: 30635, avgRating: 3.448 },
+      { genre: "Thriller", movieCount: 1889, ratingCount: 26452, avgRating: 3.494 },
+      { genre: "Adventure", movieCount: 1262, ratingCount: 24161, avgRating: 3.509 },
+      { genre: "Romance", movieCount: 1591, ratingCount: 18124, avgRating: 3.507 },
+      { genre: "Sci-Fi", movieCount: 980, ratingCount: 17243, avgRating: 3.456 },
+      { genre: "Crime", movieCount: 1196, ratingCount: 16681, avgRating: 3.658 },
+      { genre: "Fantasy", movieCount: 779, ratingCount: 11834, avgRating: 3.491 },
+      { genre: "Children", movieCount: 664, ratingCount: 9208, avgRating: 3.413 },
+      { genre: "Mystery", movieCount: 573, ratingCount: 7674, avgRating: 3.632 },
+      { genre: "Animation", movieCount: 611, ratingCount: 6988, avgRating: 3.497 },
+      { genre: "War", movieCount: 382, ratingCount: 4859, avgRating: 3.808 },
+      { genre: "IMAX", movieCount: 158, ratingCount: 4145, avgRating: 3.618 },
+      { genre: "Horror", movieCount: 977, ratingCount: 7291, avgRating: 3.258 },
+      { genre: "Musical", movieCount: 334, ratingCount: 4138, avgRating: 3.564 },
+      { genre: "Western", movieCount: 167, ratingCount: 1930, avgRating: 3.584 },
+      { genre: "Film-Noir", movieCount: 87, ratingCount: 870, avgRating: 3.920 }
+    ];
+
+    const hiddenGems = [
+      { id: 1041, title: "Secrets & Lies (1996)", genres: "Drama", count: 11, avg: 4.59, score: 4.072 },
+      { id: 1204, title: "Lawrence of Arabia (1962)", genres: "Adventure|Drama|War", count: 45, avg: 4.30, score: 4.155 },
+      { id: 1217, title: "Ran (1985)", genres: "Drama|War", count: 15, avg: 4.43, score: 4.058 },
+      { id: 1235, title: "Harold and Maude (1971)", genres: "Comedy|Drama|Romance", count: 26, avg: 4.29, score: 4.071 },
+      { id: 1250, title: "Bridge on the River Kwai (1957)", genres: "Adventure|Drama|War", count: 43, avg: 4.26, score: 4.117 },
+      { id: 1276, title: "Cool Hand Luke (1967)", genres: "Drama", count: 44, avg: 4.27, score: 4.128 },
+      { id: 1278, title: "Young Frankenstein (1974)", genres: "Comedy|Fantasy", count: 49, avg: 4.22, score: 4.098 },
+      { id: 2329, title: "American History X (1998)", genres: "Crime|Drama", count: 48, avg: 4.22, score: 4.096 }
+    ];
+
+    const hadoopJobs = [
+      { name: "AverageMovieRating", id: "job_001", status: "SUCCEEDED", in: "100,836", out: "9,724", dur: "14s", path: "/cinemetrics/output/avgrating" },
+      { name: "MostRatedMovies", id: "job_002", status: "SUCCEEDED", in: "100,836", out: "9,724", dur: "11s", path: "/cinemetrics/output/mostrated" },
+      { name: "RatingDistribution", id: "job_003", status: "SUCCEEDED", in: "100,836", out: "10", dur: "9s", path: "/cinemetrics/output/ratingdist" },
+      { name: "GenrePopularity", id: "job_004", status: "SUCCEEDED", in: "100,836", out: "20", dur: "18s", path: "/cinemetrics/output/genrepop" },
+      { name: "YearRatingJob", id: "job_005", status: "SUCCEEDED", in: "100,836", out: "107", dur: "13s", path: "/cinemetrics/output/yearrating" },
+      { name: "HiddenGemsJob", id: "job_006", status: "SUCCEEDED", in: "100,836", out: "355", dur: "12s", path: "/cinemetrics/output/hiddengems" },
+      { name: "RatingTrendsJob", id: "job_007", status: "SUCCEEDED", in: "100,836", out: "267", dur: "15s", path: "/cinemetrics/output/ratingtrends" }
+    ];
+
+    const vivaQuestions = [
+      { q: "1. Why did we use an in-mapper Combiner for rating sums but not raw averages?", a: "Average is non-associative: Avg(Avg(A), Avg(B)) ≠ Avg(A, B). The combiner must emit partial (sum, count) pairs so the Reducer computes globalSum / globalCount." },
+      { q: "2. How does a Map-Side Join work in GenrePopularityJob?", a: "The small movies.csv file (494 KB) is placed in Hadoop's DistributedCache and read into memory inside the mapper's setup() method. As ratings stream through map(), genres are looked up in RAM with zero network shuffle overhead." },
+      { q: "3. What is the Bayesian Weighted Rating formula in HiddenGemsJob?", a: "WR = (v / (v + m)) * R + (m / (v + m)) * C, where v = votes, R = avg rating, m = 10, and C = 3.5016 (global mean). It prevents a movie with only 1 rating of 5.0 from dominating top rankings." },
+      { q: "4. What is the difference between HDFS NameNode and DataNode?", a: "The NameNode manages the filesystem metadata, namespace tree, and block locations in RAM. DataNodes store the actual 128MB data blocks on physical disks." },
+      { q: "5. What are the 5 Vs of Big Data in CineMetrics?", a: "Volume (100k to 32M+ rows), Velocity (streaming user ratings), Variety (CSVs, pipe genres, free-text tags), Veracity (corrupted rows handled by CSVParser), Value (discovering hidden gems)." },
+      { q: "6. How does Hadoop achieve fault tolerance?", a: "By replicating each HDFS block across 3 distinct DataNodes. If a DataNode heartbeats stop for 10 minutes, the NameNode marks it dead and re-replicates missing blocks." },
+      { q: "7. What is Data Locality in Hadoop?", a: "YARN schedules Map tasks on the physical machine where the HDFS data block resides (node-local), eliminating high-latency network file transfers." }
+    ];
+
+    // Navigation Switcher
+    function switchTab(tabId) {
+      ['overview', 'movies', 'genres', 'ratings', 'hadoop', 'architecture'].forEach(t => {
+        const el = document.getElementById('tab-' + t);
+        if (el) el.classList.add('hidden');
+      });
+      const activeEl = document.getElementById('tab-' + tabId);
+      if (activeEl) activeEl.classList.remove('hidden');
+
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.className = "nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-[#9aa0b8] hover:text-white hover:bg-[#1a1a2e]";
+      });
+      event.currentTarget.className = "nav-btn active w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-violet-300 bg-violet-600/15 border border-violet-500/30";
+    }
+
+    // Populate Tab 1: Histogram Bars & Top Rated Movies
+    function renderOverview() {
+      const distContainer = document.getElementById('distributionBars');
+      const maxCount = Math.max(...ratingDistribution.map(d => d.count));
+      distContainer.innerHTML = ratingDistribution.map(d => {
+        const pct = ((d.count / maxCount) * 100).toFixed(1);
+        return `
+          <div class="flex items-center gap-3 text-xs">
+            <span class="w-10 text-right font-mono font-bold text-white">${d.rating} ★</span>
+            <div class="flex-1 bg-[#0d0d14] rounded-full h-3.5 overflow-hidden border border-[#252538]">
+              <div class="h-full bg-gradient-to-r from-violet-600 to-indigo-500 rounded-full" style="width: ${pct}%"></div>
+            </div>
+            <span class="w-16 font-mono text-violet-300 text-right text-[11px]">${d.count.toLocaleString()}</span>
+          </div>
+        `;
+      }).join('');
+
+      const topList = document.getElementById('topRatedList');
+      topList.innerHTML = top10MostRated.slice(0, 6).map((m, idx) => `
+        <div class="flex items-center justify-between p-2.5 rounded-lg bg-[#0d0d14] border border-[#252538] text-xs">
+          <div class="flex items-center gap-2.5 min-w-0 pr-2">
+            <span class="w-5 h-5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 flex items-center justify-center font-mono text-[10px] font-bold shrink-0">
+              ${idx + 1}
+            </span>
+            <div class="min-w-0">
+              <p class="font-medium text-white truncate">${m.title}</p>
+              <p class="text-[10px] text-[#646a84] truncate">${m.genres}</p>
+            </div>
+          </div>
+          <div class="text-right shrink-0">
+            <span class="font-mono font-bold text-violet-300">${m.count} votes</span>
+            <p class="text-[10px] text-amber-400">${m.avg.toFixed(2)} ★</p>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Populate Tab 2: Movie Explorer
+    function filterMovies() {
+      const query = document.getElementById('movieSearch').value.toLowerCase();
+      const genre = document.getElementById('genreFilter').value;
+      const sortBy = document.getElementById('sortBy').value;
+
+      let filtered = sampleMovies.filter(m => {
+        const matchTitle = m.title.toLowerCase().includes(query);
+        const matchGenre = !genre || m.genres.includes(genre);
+        return matchTitle && matchGenre;
+      });
+
+      if (sortBy === 'weighted') filtered.sort((a,b) => b.weighted - a.weighted);
+      else if (sortBy === 'votes') filtered.sort((a,b) => b.count - a.count);
+      else if (sortBy === 'avg') filtered.sort((a,b) => b.avg - a.avg);
+      else if (sortBy === 'title') filtered.sort((a,b) => a.title.localeCompare(b.title));
+
+      const tbody = document.getElementById('moviesTableBody');
+      tbody.innerHTML = filtered.map(m => `
+        <tr class="hover:bg-[#1c1c2e] transition-colors">
+          <td class="py-3 px-4 font-semibold text-white">${m.title}</td>
+          <td class="py-3 px-3 font-mono">${m.year || '—'}</td>
+          <td class="py-3 px-3 text-[11px] text-[#9aa0b8]">${m.genres}</td>
+          <td class="py-3 px-3 text-right font-mono font-bold text-amber-400">${m.avg.toFixed(2)} ★</td>
+          <td class="py-3 px-3 text-right font-mono text-violet-300 font-bold">${m.count}</td>
+          <td class="py-3 px-4 text-right font-mono text-emerald-400 font-bold">${m.weighted}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Populate Tab 3: Genre Popularity
+    function renderGenres() {
+      const visualizer = document.getElementById('genreVisualizer');
+      const maxVotes = genresList[0].ratingCount;
+
+      visualizer.innerHTML = `
+        <div class="rounded-xl bg-[#161622] border border-[#252538] p-5 shadow-xl space-y-3">
+          <h4 class="text-sm font-bold text-white">Genre Audience Volume (Most Watched)</h4>
+          <div class="space-y-2 pt-1">
+            ${genresList.slice(0, 8).map(g => `
+              <div class="flex items-center gap-2 text-xs">
+                <span class="w-20 truncate text-white font-medium">${g.genre}</span>
+                <div class="flex-1 bg-[#0d0d14] rounded-full h-3 overflow-hidden border border-[#252538]">
+                  <div class="h-full bg-violet-600 rounded-full" style="width: ${(g.ratingCount / maxVotes * 100).toFixed(1)}%"></div>
+                </div>
+                <span class="w-16 font-mono text-right text-violet-300">${g.ratingCount.toLocaleString()}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-[#161622] border border-[#252538] p-5 shadow-xl space-y-3">
+          <h4 class="text-sm font-bold text-white">Critical Acclaim by Genre (Highest Avg)</h4>
+          <div class="space-y-2 pt-1">
+            ${[...genresList].sort((a,b) => b.avgRating - a.avgRating).slice(0, 8).map(g => `
+              <div class="flex items-center gap-2 text-xs">
+                <span class="w-20 truncate text-white font-medium">${g.genre}</span>
+                <div class="flex-1 bg-[#0d0d14] rounded-full h-3 overflow-hidden border border-[#252538]">
+                  <div class="h-full bg-emerald-500 rounded-full" style="width: ${((g.avgRating - 2.5) / 1.8 * 100).toFixed(1)}%"></div>
+                </div>
+                <span class="w-16 font-mono text-right text-amber-400">${g.avgRating.toFixed(2)} ★</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+
+      const tbody = document.getElementById('genreTableBody');
+      tbody.innerHTML = genresList.map(g => `
+        <tr class="hover:bg-[#1c1c2e]">
+          <td class="py-2.5 px-4 font-semibold text-white">${g.genre}</td>
+          <td class="py-2.5 px-3 text-right font-mono text-cyan-300">${g.movieCount.toLocaleString()}</td>
+          <td class="py-2.5 px-3 text-right font-mono text-violet-300 font-bold">${g.ratingCount.toLocaleString()}</td>
+          <td class="py-2.5 px-4 text-right font-mono font-bold text-amber-400">${g.avgRating.toFixed(2)} ★</td>
+        </tr>
+      `).join('');
+    }
+
+    // Populate Tab 4: Hidden Gems
+    function renderHiddenGems() {
+      const tbody = document.getElementById('gemsTableBody');
+      tbody.innerHTML = hiddenGems.map((g, idx) => `
+        <tr class="hover:bg-[#1c1c2e]">
+          <td class="py-3 px-4 font-semibold text-white">#${idx+1} ${g.title}</td>
+          <td class="py-3 px-3 text-[#9aa0b8]">${g.genres}</td>
+          <td class="py-3 px-3 text-right font-mono font-bold text-amber-400">${g.avg.toFixed(2)} ★</td>
+          <td class="py-3 px-3 text-right font-mono text-violet-300 font-bold">${g.count} votes</td>
+          <td class="py-3 px-4 text-right font-mono text-emerald-400 font-bold">${g.score.toFixed(3)}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Populate Tab 5: Hadoop Monitor
+    function renderHadoopMonitor() {
+      const container = document.getElementById('hadoopJobCards');
+      container.innerHTML = hadoopJobs.map(j => `
+        <div class="rounded-xl bg-[#161622] border border-[#252538] p-4 space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-bold text-white text-xs">${j.name}</h4>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">${j.status}</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-[11px] pt-1">
+            <div class="p-2 bg-[#0d0d14] rounded border border-[#252538]">
+              <span class="text-[#646a84] text-[9px] uppercase block">Input</span>
+              <span class="font-mono text-white font-bold">${j.in}</span>
+            </div>
+            <div class="p-2 bg-[#0d0d14] rounded border border-[#252538]">
+              <span class="text-[#646a84] text-[9px] uppercase block">Output</span>
+              <span class="font-mono text-violet-300 font-bold">${j.out}</span>
+            </div>
+          </div>
+          <div class="text-[10px] text-[#646a84] flex items-center justify-between pt-1 border-t border-[#252538]">
+            <span>Duration: ${j.dur}</span>
+            <span class="truncate max-w-[120px]" title="${j.path}">${j.path}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Populate Tab 6: Architecture & Viva
+    function renderArchitecture() {
+      const pipeline = [
+        { s: "1. MovieLens CSV", d: "ratings & movies raw input" },
+        { s: "2. HDFS Ingestion", d: "128MB DataNode blocks" },
+        { s: "3. InputSplit & Map", d: "LineRecordReader parsing" },
+        { s: "4. Combiner Phase", d: "Map-side sum & count" },
+        { s: "5. Shuffle & Sort", d: "Hash partition & grouping" },
+        { s: "6. Reducer Phase", d: "Average & Bayesian score" },
+        { s: "7. Output Partitions", d: "part-r-00000 TSV files" },
+        { s: "8. Dashboard UI", d: "Interactive visualizer" }
+      ];
+
+      const pContainer = document.getElementById('pipelineCards');
+      pContainer.innerHTML = pipeline.map((p, idx) => `
+        <div class="p-2.5 rounded-lg bg-[#0d0d14] border border-[#252538] text-center">
+          <span class="text-[9px] font-mono font-bold text-violet-400 block">STEP 0${idx+1}</span>
+          <p class="text-xs font-bold text-white mt-0.5 leading-tight">${p.s}</p>
+          <p class="text-[10px] text-[#646a84] mt-1">${p.d}</p>
+        </div>
+      `).join('');
+
+      const vContainer = document.getElementById('vivaContainer');
+      vContainer.innerHTML = vivaQuestions.map((v, idx) => `
+        <details class="group rounded-lg bg-[#0d0d14] border border-[#252538] overflow-hidden text-xs">
+          <summary class="p-3 font-semibold text-white cursor-pointer hover:text-violet-300 list-none flex items-center justify-between">
+            <span>${v.q}</span>
+            <span class="text-violet-400 font-bold transition-transform group-open:rotate-180">▼</span>
+          </summary>
+          <div class="p-3 pt-1 text-[#9aa0b8] border-t border-[#252538]/60 bg-[#12121c]/40 leading-relaxed">
+            ${v.a}
+          </div>
+        </details>
+      `).join('');
+    }
+
+    // Initialize all tabs
+    renderOverview();
+    filterMovies();
+    renderGenres();
+    renderHiddenGems();
+    renderHadoopMonitor();
+    renderArchitecture();
+  </script>
+</body>
+</html>
