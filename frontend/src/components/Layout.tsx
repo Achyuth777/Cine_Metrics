@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Link, Outlet, useLocation } from 'react-router-dom';
 import {
+  Home,
   LayoutDashboard,
   Film,
   Tags,
@@ -23,7 +24,8 @@ import { api } from '../api';
 import { HadoopStatus } from '../types';
 
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Overview', badge: 'KPIs' },
+  { to: '/', icon: Home, label: 'Landing Showcase', badge: 'Home' },
+  { to: '/overview', icon: LayoutDashboard, label: 'Studio Overview', badge: 'KPIs' },
   { to: '/movies', icon: Film, label: 'Movie Explorer', badge: 'Catalog' },
   { to: '/genres', icon: Tags, label: 'Genre Analytics', badge: 'Taxonomy' },
   { to: '/ratings', icon: BarChart3, label: 'Rating Intelligence', badge: 'Bayes' },
@@ -82,13 +84,13 @@ export default function Layout() {
       >
         {/* Brand / Logo */}
         <div className="flex items-center justify-between px-4 py-4 border-b border-[#282A30] h-16 min-h-16">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#F4B860] via-[#E5A74E] to-[#B87A2B] flex items-center justify-center flex-shrink-0 shadow-md shadow-amber-950/20">
+          <Link to="/" className="flex items-center gap-3 overflow-hidden group">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#F4B860] via-[#E5A74E] to-[#B87A2B] flex items-center justify-center flex-shrink-0 shadow-md shadow-amber-950/20 group-hover:scale-105 transition-transform">
               <Star className="w-5 h-5 text-[#101114] fill-[#101114]" />
             </div>
             {(!desktopCollapsed || mobileMenuOpen) && (
               <div className="truncate">
-                <h1 className="text-sm font-bold tracking-tight text-[#F4F4F5] flex items-center gap-1.5 truncate">
+                <h1 className="text-sm font-bold tracking-tight text-[#F4F4F5] group-hover:text-[#F4B860] flex items-center gap-1.5 truncate transition-colors">
                   CineMetrics
                 </h1>
                 <span className="text-[10px] font-mono font-semibold tracking-wider text-[#F4B860] uppercase block truncate">
@@ -96,7 +98,7 @@ export default function Layout() {
                 </span>
               </div>
             )}
-          </div>
+          </Link>
 
           {/* Mobile close button */}
           <button
