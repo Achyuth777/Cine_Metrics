@@ -2,8 +2,7 @@
 Overview Router
 ================
 Provides the /api/overview endpoint that returns global dashboard statistics.
-This is typically the first API call made by the frontend to populate the
-main dashboard cards and summary information.
+This is the primary summary call made by the frontend to populate key metric cards.
 """
 
 import logging
@@ -23,20 +22,7 @@ router = APIRouter(prefix="/api", tags=["Overview"])
 @router.get("/overview", response_model=OverviewResponse)
 async def get_overview():
     """
-    Return global dashboard statistics.
-
-    Aggregates data from all loaded sources into a single response
-    suitable for rendering the main dashboard view:
-
-    - Total movies, ratings, and unique users
-    - Global average rating
-    - Genre count
-    - The highest-rated movie (with a minimum vote threshold)
-    - Dataset metadata (name, version, source)
-    - Timestamp of the last data processing run
-
-    Returns:
-        OverviewResponse with all dashboard summary fields.
+    Return global dashboard statistics with engine provenance.
     """
     stats = data_loader.global_stats
 
@@ -46,17 +32,22 @@ async def get_overview():
     if highest_rated:
         highest_rated_model = HighestRatedMovie(**highest_rated)
 
-    # Count actual records from the ratings file if available
-    total_records = stats["totalRatings"]
+    total_records = stats.get("totalRatings", 0)
 
-    # Build dataset info
     dataset_info = DatasetInfo(
         name=settings.DATASET_NAME,
         version=settings.DATASET_VERSION,
         source=settings.DATASET_SOURCE,
         records=total_records,
+        movies=stats.get("totalMovies", 0),
+        users=stats.get("uniqueUsers", 0),
+        license="GroupLens Research / Non-commercial academic research",
         files=_get_file_info(),
     )
+
+    engine = data_loader.provenance_info.get("engine", "python-reference")
+    processed_at = data_loader.provenance_info.get("processedAt") or data_loader.last_loaded or "unknown"
+    api_loaded_at = data_loader.provenance_info.get("apiLoadedAt") or data_loader.last_loaded
 
     return OverviewResponse(
         totalMovies=stats["totalMovies"],
@@ -66,19 +57,15 @@ async def get_overview():
         genreCount=stats["genreCount"],
         highestRatedMovie=highest_rated_model,
         datasetInfo=dataset_info,
-        lastProcessed=data_loader.last_loaded or "unknown",
+        engine=engine,
+        lastProcessed=processed_at,
+        apiLoadedAt=api_loaded_at,
     )
 
 
 def _get_file_info() -> list:
     """
     Gather size information for raw dataset files.
-
-    Scans the raw data directory for CSV files and returns their
-    names and sizes for the dataset info panel.
-
-    Returns:
-        List of dicts with 'name' and 'size' (human-readable) keys.
     """
     files = []
     raw_dir = settings.RAW_DATA_DIR
@@ -88,7 +75,6 @@ def _get_file_info() -> list:
     for f in sorted(raw_dir.iterdir()):
         if f.is_file() and f.suffix == ".csv":
             size_bytes = f.stat().st_size
-            # Format file size in a human-readable way
             if size_bytes < 1024:
                 size_str = f"{size_bytes} B"
             elif size_bytes < 1024 * 1024:
@@ -96,6 +82,6 @@ def _get_file_info() -> list:
             else:
                 size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
 
-            files.append({"name": f.name, "size": size_str})
+            files.append({"name": f.name, "size": size_str, "bytes": size_bytes})
 
     return files

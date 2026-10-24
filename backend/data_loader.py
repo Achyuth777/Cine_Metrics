@@ -4,11 +4,11 @@ CineMetrics Data Loader
 Loads and caches all processed analytics data at application startup.
 
 Data flow:
-  1. Raw CSVs (movies.csv, ratings.csv) live in data/raw/
-  2. MapReduce jobs produce TSV output files in data/processed/
-  3. This module reads both sources, merges movie metadata with
-     analytics results, and stores everything in module-level dicts
-     for instant access by API endpoints.
+  1. Raw CSVs (movies.csv, ratings.csv, links.csv) live in data/raw/
+  2. MapReduce jobs produce TSV output partition files in data/processed/
+  3. This module reads all partitions (part-r-*, part-m-*, part-*), merges
+     movie metadata with analytics results, and stores everything in
+     module-level caches for instant access by API endpoints.
 
 All loader functions handle missing files gracefully — they log a
 warning and return empty results so the API never crashes due to
@@ -20,6 +20,7 @@ import json
 import logging
 import math
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -34,14 +35,18 @@ logger = logging.getLogger("cinemetrics.data_loader")
 # ──────────────────────────────────────────────
 # Module-level caches (populated by init_data)
 # ──────────────────────────────────────────────
-movies: Dict[int, dict] = {}             # movieId -> {movieId, title, genres, genreList}
+movies: Dict[int, dict] = {}             # movieId -> {movieId, title, genres, genreList, year, imdbUrl, ...}
+links: Dict[int, dict] = {}              # movieId -> {movieId, imdbId, tmdbId, imdbUrl, tmdbUrl}
 average_ratings: Dict[int, dict] = {}    # movieId -> {movieId, avgRating, ratingCount}
 most_rated: List[dict] = []              # sorted list of most-rated movies
-rating_distribution: List[dict] = []     # [{rating: "4.0", count: 26818}, ...]
+rating_distribution: List[dict] = []     # [{rating: "4.0", count: 26818, percentage: 26.6}, ...]
 genre_popularity: List[dict] = []        # [{genre, movieCount, ratingCount, avgRating}, ...]
-year_ratings: List[dict] = []            # [{year, avgRating, ratingCount}, ...]
-hidden_gems: List[dict] = []             # [{movieId, title, genres, avgRating, ratingCount, score}, ...]
+year_ratings: List[dict] = []            # [{year, avgRating, ratingCount, movieCount}, ...]
+hidden_gems: List[dict] = []             # [{movieId, title, genres, avgRating, ratingCount, hiddenGemScore}, ...]
 rating_trends: List[dict] = []           # [{yearMonth, count, avgRating}, ...]
+
+# Per-movie rating distributions: movieId -> {"0.5": count, ..., "5.0": count}
+movie_rating_distributions: Dict[int, Dict[str, int]] = {}
 
 # Merged movie list with analytics attached
 all_movies: List[dict] = []
@@ -58,61 +63,108 @@ global_stats: dict = {
 # Set of all unique genres found
 all_genres: set = set()
 
-# Timestamp of when data was last loaded
+# Recorded job metadata and processing provenance
+provenance_info: dict = {
+    "engine": "python-reference",
+    "mode": "offline",
+    "processedAt": None,
+    "apiLoadedAt": None,
+    "note": "Pre-processed analytics snapshot",
+    "jobs": []
+}
+
+# Timestamp of when data was last loaded into API memory
 last_loaded: Optional[str] = None
+
+# Regex patterns for extracting 4-digit release year from movie titles
+YEAR_TRAILING_REGEX = re.compile(r"\((\d{4})\)\s*$")
+YEAR_GENERAL_REGEX = re.compile(r"\((\d{4})\)")
+
+
+def extract_year(title: str) -> Optional[int]:
+    """
+    Extract a 4-digit release year from a movie title string.
+    
+    Examples:
+      'Toy Story (1995)' -> 1995
+      'Apollo 13 (1995)' -> 1995
+      'Babylon 5'        -> None
+    """
+    if not title:
+        return None
+    match = YEAR_TRAILING_REGEX.search(title)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            pass
+    # Try general match if trailing match did not succeed
+    match_gen = YEAR_GENERAL_REGEX.search(title)
+    if match_gen:
+        try:
+            y = int(match_gen.group(1))
+            if 1880 <= y <= 2035:
+                return y
+        except ValueError:
+            pass
+    return None
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  Helper: Safe file reader                                    ║
+# ║  Helper: Multi-Partition Safe File Reader                    ║
 # ╚══════════════════════════════════════════════════════════════╝
 
-def _find_output_file(directory: Path) -> Optional[Path]:
+def _find_output_files(directory: Path) -> List[Path]:
     """
-    Locate the output file inside a MapReduce output directory.
+    Locate all output partition files inside a MapReduce output directory.
 
-    MapReduce writes results to files named 'part-r-00000' (or 'part-00000')
-    inside the output directory. This helper finds the first such file,
-    or falls back to any file that isn't _SUCCESS or a log.
+    MapReduce writes results to multiple partitions: 'part-r-00000', 'part-r-00001',
+    etc. This helper finds ALL partition files matching standard naming conventions,
+    concatenating results across partitions to prevent data loss.
 
     Args:
         directory: Path to the MapReduce output folder.
 
     Returns:
-        Path to the data file, or None if the directory doesn't exist.
+        List of Path objects for all matching partition files.
     """
     if not directory.exists():
-        return None
+        return []
 
     # If it's a file already (not a directory), return it directly
     if directory.is_file():
-        return directory
+        return [directory]
 
-    # Look for standard MapReduce part files first
-    for pattern in ["part-r-*", "part-*"]:
-        parts = sorted(directory.glob(pattern))
-        if parts:
-            return parts[0]
+    # Collect standard MapReduce part files
+    found_files: List[Path] = []
+    for pattern in ["part-r-*", "part-m-*", "part-*"]:
+        for p in sorted(directory.glob(pattern)):
+            if p.is_file() and p.stat().st_size > 0 and p not in found_files:
+                found_files.append(p)
 
-    # Fallback: grab any non-metadata file
-    for f in directory.iterdir():
-        if f.is_file() and f.name not in ("_SUCCESS", "_logs", ".crc"):
-            return f
+    if found_files:
+        return found_files
 
-    return None
+    # Fallback: grab any non-metadata, non-empty file
+    for f in sorted(directory.iterdir()):
+        if f.is_file() and f.name not in ("_SUCCESS", "_logs", ".crc") and not f.name.startswith("."):
+            if f.stat().st_size > 0:
+                found_files.append(f)
+
+    return found_files
+
+
+def _find_output_file(directory: Path) -> Optional[Path]:
+    """Single file accessor for backward compatibility."""
+    files = _find_output_files(directory)
+    return files[0] if files else None
 
 
 def _read_tsv_lines(file_path: Path) -> List[List[str]]:
     """
     Read a TSV file and return rows as lists of strings.
-
     Handles both tab-separated MapReduce output and standard TSV.
     Skips blank lines and comment lines starting with #.
-
-    Args:
-        file_path: Absolute path to the TSV file.
-
-    Returns:
-        List of rows, each row being a list of string fields.
     """
     rows = []
     try:
@@ -127,9 +179,64 @@ def _read_tsv_lines(file_path: Path) -> List[List[str]]:
     return rows
 
 
+def _read_tsv_partitions(directory: Path) -> List[List[str]]:
+    """
+    Read all TSV partitions in a directory and return aggregated rows.
+    """
+    files = _find_output_files(directory)
+    if not files:
+        return []
+    all_rows = []
+    for f in files:
+        all_rows.extend(_read_tsv_lines(f))
+    return all_rows
+
+
 # ╔══════════════════════════════════════════════════════════════╗
 # ║  Individual Loaders                                          ║
 # ╚══════════════════════════════════════════════════════════════╝
+
+def load_links() -> Dict[int, dict]:
+    """
+    Parse links.csv from MovieLens to obtain external IMDb and TMDb IDs.
+    
+    Expected CSV columns: movieId, imdbId, tmdbId
+    Returns:
+        Dict mapping movieId -> {movieId, imdbId, tmdbId, imdbUrl, tmdbUrl}
+    """
+    result: Dict[int, dict] = {}
+    csv_path = settings.RAW_DATA_DIR / "links.csv"
+    if not csv_path.exists():
+        logger.warning(f"links.csv not found: {csv_path}")
+        return result
+
+    try:
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    movie_id = int(row["movieId"])
+                    imdb_raw = row.get("imdbId", "").strip()
+                    tmdb_raw = row.get("tmdbId", "").strip()
+                    # IMDb ids typically require 7 digits formatted as tt0000000
+                    imdb_formatted = imdb_raw.zfill(7) if imdb_raw and imdb_raw.isdigit() else imdb_raw
+                    imdb_url = f"https://www.imdb.com/title/tt{imdb_formatted}/" if imdb_formatted else None
+                    tmdb_url = f"https://www.themoviedb.org/movie/{tmdb_raw}" if tmdb_raw else None
+                    result[movie_id] = {
+                        "movieId": movie_id,
+                        "imdbId": imdb_formatted or None,
+                        "tmdbId": tmdb_raw or None,
+                        "imdbUrl": imdb_url,
+                        "tmdbUrl": tmdb_url,
+                    }
+                except (ValueError, KeyError):
+                    continue
+        logger.info(f"✓ Loaded links for {len(result)} movies from {csv_path.name}")
+    except Exception as e:
+        logger.error(f"Error loading links.csv: {e}")
+
+    return result
+
 
 def load_movies() -> Dict[int, dict]:
     """
@@ -137,6 +244,7 @@ def load_movies() -> Dict[int, dict]:
 
     Expected CSV columns: movieId, title, genres
     Genres are pipe-separated (e.g. "Action|Adventure|Sci-Fi").
+    Extracts release year from title.
 
     Returns:
         Dict mapping movieId (int) to movie metadata dict.
@@ -153,13 +261,16 @@ def load_movies() -> Dict[int, dict]:
             reader = csv.DictReader(f)
             for row in reader:
                 movie_id = int(row["movieId"])
-                genres_str = row.get("genres", "(no genres listed)")
+                title = row["title"].strip()
+                genres_str = row.get("genres", "(no genres listed)").strip()
                 genre_list = [g.strip() for g in genres_str.split("|") if g.strip() and g != "(no genres listed)"]
+                year = extract_year(title)
                 result[movie_id] = {
                     "movieId": movie_id,
-                    "title": row["title"],
+                    "title": title,
                     "genres": genres_str,
                     "genreList": genre_list,
+                    "year": year,
                 }
         logger.info(f"✓ Loaded {len(result)} movies from {csv_path.name}")
     except Exception as e:
@@ -170,33 +281,29 @@ def load_movies() -> Dict[int, dict]:
 
 def load_average_ratings() -> Dict[int, dict]:
     """
-    Parse the AverageRating MapReduce output.
+    Parse the AverageRating MapReduce output across all reducer partitions.
 
     Expected TSV format: movieId \\t avgRating \\t ratingCount
-    (Some formats may have movieId \\t avgRating,ratingCount)
 
     Returns:
         Dict mapping movieId to {avgRating, ratingCount}.
     """
     result: Dict[int, dict] = {}
     output_dir = settings.DATA_DIR / "avgrating"
-    data_file = _find_output_file(output_dir)
+    rows = _read_tsv_partitions(output_dir)
 
-    if not data_file:
-        logger.warning(f"Average ratings output not found in {output_dir}")
+    if not rows:
+        logger.warning(f"Average ratings output partitions not found in {output_dir}")
         return result
 
     try:
-        rows = _read_tsv_lines(data_file)
         for fields in rows:
             if len(fields) >= 2:
                 movie_id = int(fields[0].strip())
-                # Handle both "avg\tcount" and "avg,count" formats
                 if len(fields) >= 3:
                     avg_rating = float(fields[1].strip())
                     rating_count = int(fields[2].strip())
                 else:
-                    # Could be "avgRating,ratingCount" in second field
                     parts = fields[1].strip().split(",")
                     avg_rating = float(parts[0].strip())
                     rating_count = int(parts[1].strip()) if len(parts) > 1 else 0
@@ -206,7 +313,7 @@ def load_average_ratings() -> Dict[int, dict]:
                     "avgRating": round(avg_rating, 4),
                     "ratingCount": rating_count,
                 }
-        logger.info(f"✓ Loaded average ratings for {len(result)} movies")
+        logger.info(f"✓ Loaded average ratings for {len(result)} movies across partitions")
     except Exception as e:
         logger.error(f"Error loading average ratings: {e}")
 
@@ -215,32 +322,27 @@ def load_average_ratings() -> Dict[int, dict]:
 
 def load_most_rated() -> List[dict]:
     """
-    Parse the MostRated MapReduce output.
+    Parse the MostRated MapReduce output across all reducer partitions.
 
     Expected TSV format: movieId \\t ratingCount
-    The output is typically sorted by ratingCount descending.
-
-    Returns:
-        List of {movieId, ratingCount} dicts, highest first.
+    Returns list sorted descending by ratingCount.
     """
     result: List[dict] = []
     output_dir = settings.DATA_DIR / "mostrated"
-    data_file = _find_output_file(output_dir)
+    rows = _read_tsv_partitions(output_dir)
 
-    if not data_file:
-        logger.warning(f"Most rated output not found in {output_dir}")
+    if not rows:
+        logger.warning(f"Most rated output partitions not found in {output_dir}")
         return result
 
     try:
-        rows = _read_tsv_lines(data_file)
         for fields in rows:
             if len(fields) >= 2:
                 movie_id = int(fields[0].strip())
                 count = int(fields[1].strip())
                 result.append({"movieId": movie_id, "ratingCount": count})
-        # Sort by ratingCount descending
         result.sort(key=lambda x: x["ratingCount"], reverse=True)
-        logger.info(f"✓ Loaded most-rated data for {len(result)} movies")
+        logger.info(f"✓ Loaded most-rated data for {len(result)} movies across partitions")
     except Exception as e:
         logger.error(f"Error loading most rated: {e}")
 
@@ -255,26 +357,33 @@ def load_rating_distribution() -> List[dict]:
     (e.g., "4.0\\t26818")
 
     Returns:
-        List of {rating (str), count (int)} dicts sorted by rating.
+        List of {rating (str), count (int), percentage (float)} dicts sorted by rating.
     """
     result: List[dict] = []
     output_dir = settings.DATA_DIR / "ratingdist"
-    data_file = _find_output_file(output_dir)
+    rows = _read_tsv_partitions(output_dir)
 
-    if not data_file:
+    if not rows:
         logger.warning(f"Rating distribution output not found in {output_dir}")
         return result
 
     try:
-        rows = _read_tsv_lines(data_file)
+        total_count = 0
         for fields in rows:
             if len(fields) >= 2:
                 rating_val = fields[0].strip()
                 count = int(fields[1].strip())
                 result.append({"rating": rating_val, "count": count})
-        # Sort by rating value
+                total_count += count
+
+        # Sort by numerical rating value
         result.sort(key=lambda x: float(x["rating"]))
-        logger.info(f"✓ Loaded rating distribution with {len(result)} buckets")
+
+        # Compute accurate percentage
+        for r in result:
+            r["percentage"] = round((r["count"] / total_count) * 100, 2) if total_count > 0 else 0.0
+
+        logger.info(f"✓ Loaded rating distribution with {len(result)} buckets (total ratings: {total_count})")
     except Exception as e:
         logger.error(f"Error loading rating distribution: {e}")
 
@@ -283,24 +392,19 @@ def load_rating_distribution() -> List[dict]:
 
 def load_genre_popularity() -> List[dict]:
     """
-    Parse the GenrePopularity MapReduce output.
+    Parse the GenrePopularity MapReduce output across partitions.
 
     Expected TSV format: genre \\t movieCount \\t ratingCount \\t avgRating
-    (Some formats: genre \\t ratingCount)
-
-    Returns:
-        List of genre stats dicts sorted by ratingCount descending.
     """
     result: List[dict] = []
     output_dir = settings.DATA_DIR / "genrepop"
-    data_file = _find_output_file(output_dir)
+    rows = _read_tsv_partitions(output_dir)
 
-    if not data_file:
+    if not rows:
         logger.warning(f"Genre popularity output not found in {output_dir}")
         return result
 
     try:
-        rows = _read_tsv_lines(data_file)
         for fields in rows:
             if len(fields) >= 2:
                 genre = fields[0].strip()
@@ -315,7 +419,6 @@ def load_genre_popularity() -> List[dict]:
                     rating_count = int(fields[2].strip())
                     avg_rating = 0.0
                 else:
-                    # Minimal format: genre \t ratingCount
                     movie_count = 0
                     rating_count = int(fields[1].strip())
                     avg_rating = 0.0
@@ -327,7 +430,7 @@ def load_genre_popularity() -> List[dict]:
                     "avgRating": round(avg_rating, 4),
                 })
         result.sort(key=lambda x: x["ratingCount"], reverse=True)
-        logger.info(f"✓ Loaded genre popularity for {len(result)} genres")
+        logger.info(f"✓ Loaded genre popularity for {len(result)} genres across partitions")
     except Exception as e:
         logger.error(f"Error loading genre popularity: {e}")
 
@@ -336,39 +439,40 @@ def load_genre_popularity() -> List[dict]:
 
 def load_year_ratings() -> List[dict]:
     """
-    Parse the YearRating MapReduce output.
+    Parse the YearRating MapReduce output across partitions.
 
-    Expected TSV format: year \\t avgRating \\t ratingCount
-
-    Returns:
-        List of {year, avgRating, ratingCount} dicts sorted by year.
+    Expected TSV format: year \\t avgRating \\t ratingCount (\\t movieCount optional)
     """
     result: List[dict] = []
     output_dir = settings.DATA_DIR / "yearrating"
-    data_file = _find_output_file(output_dir)
+    rows = _read_tsv_partitions(output_dir)
 
-    if not data_file:
+    if not rows:
         logger.warning(f"Year ratings output not found in {output_dir}")
         return result
 
     try:
-        rows = _read_tsv_lines(data_file)
         for fields in rows:
             if len(fields) >= 2:
                 year = fields[0].strip()
-                if len(fields) >= 3:
-                    avg_rating = float(fields[1].strip())
-                    rating_count = int(fields[2].strip())
-                else:
-                    avg_rating = float(fields[1].strip())
-                    rating_count = 0
+                avg_rating = float(fields[1].strip())
+                rating_count = int(fields[2].strip()) if len(fields) >= 3 else 0
+                movie_count = int(fields[3].strip()) if len(fields) >= 4 else 0
                 result.append({
                     "year": year,
                     "avgRating": round(avg_rating, 4),
                     "ratingCount": rating_count,
+                    "movieCount": movie_count,
                 })
-        result.sort(key=lambda x: x["year"])
-        logger.info(f"✓ Loaded year ratings for {len(result)} years")
+        # Sort by year (putting 'Unknown' at the end)
+        def sort_year_key(item):
+            y_str = item["year"]
+            try:
+                return (0, int(y_str))
+            except ValueError:
+                return (1, 9999)
+        result.sort(key=sort_year_key)
+        logger.info(f"✓ Loaded year ratings for {len(result)} years across partitions")
     except Exception as e:
         logger.error(f"Error loading year ratings: {e}")
 
@@ -377,34 +481,27 @@ def load_year_ratings() -> List[dict]:
 
 def load_hidden_gems() -> List[dict]:
     """
-    Parse the HiddenGems MapReduce output.
+    Parse the HiddenGems MapReduce output across partitions.
 
     Expected TSV format: movieId \\t avgRating \\t ratingCount \\t score
-    (score = composite metric favouring high rating + low popularity)
-
-    Returns:
-        List of hidden gem dicts sorted by score descending.
     """
     result: List[dict] = []
     output_dir = settings.DATA_DIR / "hiddengems"
-    data_file = _find_output_file(output_dir)
+    rows = _read_tsv_partitions(output_dir)
 
-    if not data_file:
+    if not rows:
         logger.warning(f"Hidden gems output not found in {output_dir}")
         return result
 
     try:
-        rows = _read_tsv_lines(data_file)
         for fields in rows:
             if len(fields) >= 3:
                 movie_id = int(fields[0].strip())
                 avg_rating = float(fields[1].strip())
                 rating_count = int(fields[2].strip())
-                # Score may be in 4th field, or we compute it ourselves
                 if len(fields) >= 4:
                     score = float(fields[3].strip())
                 else:
-                    # Simple hidden gem score: high rating, low count
                     score = round(avg_rating / math.log2(rating_count + 2), 4)
 
                 result.append({
@@ -414,7 +511,7 @@ def load_hidden_gems() -> List[dict]:
                     "hiddenGemScore": round(score, 4),
                 })
         result.sort(key=lambda x: x["hiddenGemScore"], reverse=True)
-        logger.info(f"✓ Loaded {len(result)} hidden gems")
+        logger.info(f"✓ Loaded {len(result)} hidden gems across partitions")
     except Exception as e:
         logger.error(f"Error loading hidden gems: {e}")
 
@@ -423,24 +520,19 @@ def load_hidden_gems() -> List[dict]:
 
 def load_rating_trends() -> List[dict]:
     """
-    Parse the RatingTrends MapReduce output.
+    Parse the RatingTrends MapReduce output across partitions.
 
     Expected TSV format: yearMonth \\t count \\t avgRating
-    (yearMonth is in "YYYY-MM" format)
-
-    Returns:
-        List of {yearMonth, count, avgRating} dicts sorted chronologically.
     """
     result: List[dict] = []
     output_dir = settings.DATA_DIR / "ratingtrends"
-    data_file = _find_output_file(output_dir)
+    rows = _read_tsv_partitions(output_dir)
 
-    if not data_file:
+    if not rows:
         logger.warning(f"Rating trends output not found in {output_dir}")
         return result
 
     try:
-        rows = _read_tsv_lines(data_file)
         for fields in rows:
             if len(fields) >= 3:
                 year_month = fields[0].strip()
@@ -460,7 +552,7 @@ def load_rating_trends() -> List[dict]:
                     "avgRating": 0.0,
                 })
         result.sort(key=lambda x: x["yearMonth"])
-        logger.info(f"✓ Loaded rating trends for {len(result)} months")
+        logger.info(f"✓ Loaded rating trends for {len(result)} months across partitions")
     except Exception as e:
         logger.error(f"Error loading rating trends: {e}")
 
@@ -468,67 +560,74 @@ def load_rating_trends() -> List[dict]:
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  Stats Calculators                                           ║
+# ║  Raw Ingestion & Distribution Builder                        ║
 # ╚══════════════════════════════════════════════════════════════╝
 
-def _count_unique_users_and_ratings() -> Tuple[int, int, float]:
+def _ingest_ratings_csv() -> Tuple[int, int, float, Dict[int, Dict[str, int]]]:
     """
-    Scan ratings.csv to count unique users, total ratings, and global average.
-
-    This reads the raw ratings file line-by-line to avoid loading the
-    entire file into memory (important for large datasets).
+    Scan ratings.csv to count unique users, total ratings, global average,
+    and build individual per-movie rating distributions (0.5 to 5.0 stars).
 
     Returns:
-        Tuple of (unique_user_count, total_rating_count, global_avg_rating).
+        Tuple of (unique_users, total_ratings, global_avg, movie_rating_distributions)
     """
     ratings_path = settings.RAW_DATA_DIR / "ratings.csv"
     if not ratings_path.exists():
         logger.warning(f"Ratings file not found: {ratings_path}")
-        return 0, 0, 0.0
+        return 0, 0, 0.0, {}
 
     users = set()
     total_count = 0
     rating_sum = 0.0
+    distributions: Dict[int, Dict[str, int]] = {}
+
+    # Valid half-star keys
+    valid_buckets = ["0.5", "1.0", "1.5", "2.0", "2.5", "3.0", "3.5", "4.0", "4.5", "5.0"]
 
     try:
         with open(ratings_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                users.add(row["userId"])
+                try:
+                    user_id = row["userId"]
+                    movie_id = int(row["movieId"])
+                    rating_float = float(row["rating"])
+                except (ValueError, KeyError):
+                    continue
+
+                users.add(user_id)
                 total_count += 1
-                rating_sum += float(row["rating"])
+                rating_sum += rating_float
+
+                if movie_id not in distributions:
+                    distributions[movie_id] = {k: 0 for k in valid_buckets}
+
+                rating_key = f"{rating_float:.1f}"
+                if rating_key in distributions[movie_id]:
+                    distributions[movie_id][rating_key] += 1
+                else:
+                    # In case of unconventional star format
+                    distributions[movie_id][rating_key] = distributions[movie_id].get(rating_key, 0) + 1
 
         avg = round(rating_sum / total_count, 4) if total_count > 0 else 0.0
-        logger.info(f"✓ Counted {len(users)} unique users, {total_count} ratings (avg={avg})")
-        return len(users), total_count, avg
+        logger.info(f"✓ Ingested ratings.csv: {len(users)} users, {total_count} ratings, avg={avg}")
+        return len(users), total_count, avg, distributions
     except Exception as e:
-        logger.error(f"Error counting users/ratings: {e}")
-        return 0, 0, 0.0
+        logger.error(f"Error reading ratings.csv: {e}")
+        return 0, 0, 0.0, {}
 
 
 def _compute_weighted_rating(avg_rating: float, count: int,
-                              global_avg: float, min_votes: int = 10) -> float:
+                             global_avg: float, min_votes: int = 10) -> float:
     """
-    Calculate a Bayesian weighted rating (IMDb formula).
+    Calculate a Bayesian weighted rating (IMDb / True-Bayes formula).
 
     Formula: WR = (v / (v + m)) * R  +  (m / (v + m)) * C
     where:
-        v = number of votes for this movie
-        m = minimum votes required (threshold)
+        v = rating count for this movie
+        m = minimum rating threshold (10)
         R = average rating for this movie
         C = global average rating across all movies
-
-    This prevents movies with very few ratings from appearing at the
-    top of sorted lists unfairly.
-
-    Args:
-        avg_rating: Movie's average rating.
-        count: Number of ratings the movie received.
-        global_avg: Dataset-wide average rating.
-        min_votes: Minimum vote threshold.
-
-    Returns:
-        Weighted rating as a float.
     """
     if count == 0:
         return 0.0
@@ -539,6 +638,50 @@ def _compute_weighted_rating(avg_rating: float, count: int,
     )
 
 
+def load_jobs_metadata() -> None:
+    """
+    Load job metadata from data/processed/jobs.json.
+    Establishes execution provenance (engine, processedAt, recorded jobs).
+    Does NOT invent or fabricate jobs if jobs.json does not exist.
+    """
+    global provenance_info
+    jobs_file = settings.DATA_DIR / "jobs.json"
+    if jobs_file.exists():
+        try:
+            with open(jobs_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if isinstance(data, dict):
+                job_list = data.get("jobs", [])
+                processed_at = data.get("processedAt")
+                mode = data.get("mode", "local-simulation")
+                note = data.get("note", "Local MapReduce simulation")
+            elif isinstance(data, list):
+                job_list = data
+                processed_at = None
+                mode = "offline"
+                note = "Loaded from jobs list"
+            else:
+                job_list = []
+                processed_at = None
+                mode = "offline"
+                note = "No jobs record"
+
+            # Determine genuine engine type
+            engine = "hadoop" if mode == "hadoop-cluster" else "python-reference"
+            provenance_info["jobs"] = job_list
+            provenance_info["processedAt"] = processed_at
+            provenance_info["mode"] = mode
+            provenance_info["note"] = note
+            provenance_info["engine"] = engine
+            logger.info(f"✓ Loaded job provenance: mode={mode}, engine={engine}, jobs={len(job_list)}")
+        except Exception as e:
+            logger.error(f"Error reading jobs.json: {e}")
+    else:
+        provenance_info["jobs"] = []
+        provenance_info["note"] = "No jobs.json metadata found; raw MapReduce partition outputs used"
+
+
 # ╔══════════════════════════════════════════════════════════════╗
 # ║  Master Initialization                                       ║
 # ╚══════════════════════════════════════════════════════════════╝
@@ -546,22 +689,12 @@ def _compute_weighted_rating(avg_rating: float, count: int,
 def init_data() -> None:
     """
     Load all data sources and merge them into the module-level caches.
-
     Called once at application startup from main.py's lifespan handler.
-    After this function completes, all API endpoints can read directly
-    from the module-level variables without any I/O.
-
-    Processing steps:
-        1. Load raw movie metadata
-        2. Load each MapReduce output
-        3. Count unique users from ratings.csv
-        4. Merge analytics into movie records
-        5. Compute weighted ratings
-        6. Build global statistics
     """
-    global movies, average_ratings, most_rated, rating_distribution
+    global movies, links, average_ratings, most_rated, rating_distribution
     global genre_popularity, year_ratings, hidden_gems, rating_trends
-    global all_movies, global_stats, all_genres, last_loaded
+    global movie_rating_distributions, all_movies, global_stats, all_genres
+    global last_loaded, provenance_info
 
     logger.info("=" * 60)
     logger.info("CineMetrics Data Loader — Starting initialization...")
@@ -569,10 +702,11 @@ def init_data() -> None:
     logger.info(f"  Processed data dir: {settings.DATA_DIR}")
     logger.info("=" * 60)
 
-    # Step 1: Load raw movie metadata
+    # Step 1: Load raw movie metadata & links
     movies = load_movies()
+    links = load_links()
 
-    # Step 2: Load each MapReduce output
+    # Step 2: Load each MapReduce output across partitions
     average_ratings = load_average_ratings()
     most_rated = load_most_rated()
     rating_distribution = load_rating_distribution()
@@ -581,26 +715,35 @@ def init_data() -> None:
     hidden_gems = load_hidden_gems()
     rating_trends = load_rating_trends()
 
-    # Step 3: Count unique users and total ratings from raw data
-    unique_users, total_ratings, global_avg = _count_unique_users_and_ratings()
+    # Step 3: Load jobs metadata and provenance
+    load_jobs_metadata()
 
-    # If we couldn't read ratings.csv, derive totals from average_ratings
+    # Step 4: Ingest ratings.csv to get users, totals, and per-movie distributions
+    unique_users, total_ratings, global_avg, movie_rating_distributions = _ingest_ratings_csv()
+
+    # Fallback totals from average_ratings if ratings.csv was missing
     if total_ratings == 0 and average_ratings:
         total_ratings = sum(r["ratingCount"] for r in average_ratings.values())
         if total_ratings > 0:
             rating_sum = sum(r["avgRating"] * r["ratingCount"] for r in average_ratings.values())
             global_avg = round(rating_sum / total_ratings, 4)
-            logger.info(f"  Derived total ratings from avgrating data: {total_ratings}")
 
-    # Step 4: Build hidden gem movieId set for quick lookup
-    hidden_gem_ids = {g["movieId"] for g in hidden_gems}
+    # Step 5: Build hidden gem lookup
+    hidden_gem_map = {g["movieId"]: g for g in hidden_gems}
 
-    # Step 5: Merge everything into all_movies
+    # Step 6: Merge everything into all_movies
     merged: List[dict] = []
     genre_set: set = set()
 
     for movie_id, movie in movies.items():
         record = {**movie}
+
+        # Attach link identifiers
+        link_data = links.get(movie_id, {})
+        record["imdbId"] = link_data.get("imdbId")
+        record["tmdbId"] = link_data.get("tmdbId")
+        record["imdbUrl"] = link_data.get("imdbUrl")
+        record["tmdbUrl"] = link_data.get("tmdbUrl")
 
         # Attach average rating data
         if movie_id in average_ratings:
@@ -614,47 +757,81 @@ def init_data() -> None:
         # Compute weighted rating
         if record["avgRating"] is not None and record["ratingCount"] > 0:
             record["weightedRating"] = _compute_weighted_rating(
-                record["avgRating"], record["ratingCount"], global_avg
+                record["avgRating"], record["ratingCount"], global_avg, min_votes=10
             )
         else:
             record["weightedRating"] = None
 
         # Mark hidden gems
-        record["isHiddenGem"] = movie_id in hidden_gem_ids
-        if record["isHiddenGem"]:
-            gem = next((g for g in hidden_gems if g["movieId"] == movie_id), None)
-            record["hiddenGemScore"] = gem["hiddenGemScore"] if gem else None
+        if movie_id in hidden_gem_map:
+            record["isHiddenGem"] = True
+            record["hiddenGemScore"] = hidden_gem_map[movie_id]["hiddenGemScore"]
         else:
+            record["isHiddenGem"] = False
             record["hiddenGemScore"] = None
 
-        # Collect all genres
+        # Collect unique genres
         for g in record.get("genreList", []):
             genre_set.add(g)
 
         merged.append(record)
 
+    # Step 7: Precompute ranks for fast lookup
+    # Rank by ratingCount descending
+    rated_by_count = sorted([m for m in merged if (m.get("ratingCount") or 0) > 0],
+                            key=lambda m: m["ratingCount"], reverse=True)
+    count_rank_map = {m["movieId"]: rank + 1 for rank, m in enumerate(rated_by_count)}
+
+    # Rank by avgRating descending (min 10 votes)
+    rated_by_avg = sorted([m for m in merged if (m.get("avgRating") is not None) and (m.get("ratingCount") or 0) >= 10],
+                          key=lambda m: (m["avgRating"], m["ratingCount"]), reverse=True)
+    avg_rank_map = {m["movieId"]: rank + 1 for rank, m in enumerate(rated_by_avg)}
+
+    for m in merged:
+        m_id = m["movieId"]
+        m["rankMostRated"] = count_rank_map.get(m_id)
+        m["globalRankAvg"] = avg_rank_map.get(m_id)
+
     all_movies = merged
     all_genres = genre_set
 
-    # Enrich hidden gems with movie metadata (title, genres)
+    # Step 8: Enrich hidden gems with movie metadata (title, genres, year, links)
     for gem in hidden_gems:
-        movie = movies.get(gem["movieId"])
+        m_id = gem["movieId"]
+        movie = movies.get(m_id)
+        link_data = links.get(m_id, {})
         if movie:
             gem["title"] = movie["title"]
             gem["genres"] = movie["genres"]
+            gem["year"] = movie.get("year")
         else:
-            gem["title"] = f"Unknown (ID: {gem['movieId']})"
+            gem["title"] = f"Unknown (ID: {m_id})"
             gem["genres"] = ""
+            gem["year"] = None
+        gem["imdbUrl"] = link_data.get("imdbUrl")
+        gem["tmdbUrl"] = link_data.get("tmdbUrl")
+        # Ensure weightedScore alias is present
+        ar = average_ratings.get(m_id)
+        if ar and ar.get("avgRating") is not None:
+            gem["weightedScore"] = _compute_weighted_rating(ar["avgRating"], ar["ratingCount"], global_avg, min_votes=10)
+        else:
+            gem["weightedScore"] = gem["hiddenGemScore"]
 
-    # Enrich most_rated with movie metadata
+    # Step 9: Enrich most_rated with movie metadata
     for mr in most_rated:
-        movie = movies.get(mr["movieId"])
+        m_id = mr["movieId"]
+        movie = movies.get(m_id)
+        link_data = links.get(m_id, {})
         if movie:
             mr["title"] = movie["title"]
             mr["genres"] = movie["genres"]
+            mr["year"] = movie.get("year")
+            mr["genreList"] = movie.get("genreList", [])
+        if m_id in average_ratings:
+            mr["avgRating"] = average_ratings[m_id]["avgRating"]
+        mr["imdbUrl"] = link_data.get("imdbUrl")
 
-    # Step 6: Build global stats
-    # If genre_popularity loaded, use its count; otherwise count from movies
+    # Step 10: Build global stats
     genre_count = len(genre_popularity) if genre_popularity else len(genre_set)
 
     global_stats = {
@@ -666,6 +843,7 @@ def init_data() -> None:
     }
 
     last_loaded = datetime.now(timezone.utc).isoformat()
+    provenance_info["apiLoadedAt"] = last_loaded
 
     logger.info("=" * 60)
     logger.info("CineMetrics Data Loader — Initialization complete!")
@@ -680,19 +858,11 @@ def init_data() -> None:
 
 def get_highest_rated_movie(min_ratings: int = 10) -> Optional[dict]:
     """
-    Find the highest-rated movie that has at least `min_ratings` ratings.
-
-    This prevents movies with a single 5-star rating from topping the list.
-
-    Args:
-        min_ratings: Minimum number of ratings required.
-
-    Returns:
-        Dict with movieId, title, avgRating, ratingCount — or None.
+    Find the highest-rated movie with at least `min_ratings` ratings.
     """
     candidates = [
         m for m in all_movies
-        if m.get("avgRating") is not None and m.get("ratingCount", 0) >= min_ratings
+        if m.get("avgRating") is not None and (m.get("ratingCount") or 0) >= min_ratings
     ]
     if not candidates:
         return None
@@ -703,4 +873,6 @@ def get_highest_rated_movie(min_ratings: int = 10) -> Optional[dict]:
         "title": best["title"],
         "avgRating": best["avgRating"],
         "ratingCount": best["ratingCount"],
+        "genres": best.get("genres"),
+        "year": best.get("year"),
     }

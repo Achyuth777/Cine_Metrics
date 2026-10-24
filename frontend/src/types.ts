@@ -4,9 +4,37 @@ export interface MovieSummary {
   year: number | null;
   genres: string;
   genreList: string[];
-  avgRating: number;
+  avgRating: number | null;
   ratingCount: number;
-  weightedRating: number;
+  weightedRating: number | null;
+  imdbId?: string | null;
+  tmdbId?: string | null;
+  imdbUrl?: string | null;
+  tmdbUrl?: string | null;
+}
+
+export interface MovieDetail extends MovieSummary {
+  ratingDistribution?: Record<string, number> | null;
+  isHiddenGem: boolean;
+  hiddenGemScore?: number | null;
+  rankMostRated?: number | null;
+  globalRankAvg?: number | null;
+  bayesianFormula?: {
+    v: number;
+    m: number;
+    R: number;
+    C: number;
+    WR: number;
+    formula: string;
+    explanation: string;
+  } | null;
+}
+
+export interface MovieComparisonResponse {
+  movies: MovieDetail[];
+  commonGenres: string[];
+  globalAverageRating: number;
+  analysisSummary: string;
 }
 
 export interface PaginatedMovies {
@@ -28,11 +56,12 @@ export interface GenreStats {
 export interface RatingDistribution {
   rating: string;
   count: number;
+  percentage?: number;
 }
 
 export interface RatingTrend {
   yearMonth: string;
-  ratingCount: number;
+  count: number;
   avgRating: number;
 }
 
@@ -47,19 +76,30 @@ export interface HiddenGem {
   movieId: number;
   title: string;
   genres: string;
+  year?: number | null;
   avgRating: number;
   ratingCount: number;
-  weightedScore: number;
+  hiddenGemScore: number;
+  weightedScore?: number;
+  imdbUrl?: string | null;
+  tmdbUrl?: string | null;
+}
+
+export interface DatasetFile {
+  name: string;
+  size: string;
+  bytes?: number;
 }
 
 export interface DatasetInfo {
   name: string;
   version: string;
   source: string;
-  license: string;
+  license?: string;
   records: number;
-  movies: number;
-  users: number;
+  movies?: number;
+  users?: number;
+  files?: DatasetFile[];
 }
 
 export interface OverviewData {
@@ -72,35 +112,64 @@ export interface OverviewData {
     movieId: number;
     title: string;
     genres?: string;
-    averageRating?: number;
+    year?: number | null;
     avgRating?: number;
     ratingCount: number;
   } | null;
   datasetInfo: DatasetInfo;
+  engine: string;
   lastProcessed: string;
+  apiLoadedAt?: string;
 }
 
 export interface HadoopJob {
-  jobName: string;
   jobId: string;
-  status: 'SUCCEEDED' | 'FAILED' | 'RUNNING' | 'PENDING';
-  startTime: string;
-  endTime: string;
-  duration: string;
-  inputRecords: number;
-  outputRecords: number;
-  outputPath: string;
+  jobName: string;
+  status: string;
+  startTime?: string;
+  endTime?: string;
+  duration?: string;
+  inputRecords?: number;
+  outputRecords?: number;
+  inputPath?: string;
+  outputPath?: string;
+  mapTasks?: number;
+  reduceTasks?: number;
+  mode?: string;
+  description?: string;
+}
+
+export interface HadoopJobsResponse {
+  jobs: HadoopJob[];
+  engine: string;
   mode: string;
+  processedAt?: string;
+  telemetryObservedAt?: string;
+  note?: string;
 }
 
 export interface HadoopStatus {
   connected: boolean;
-  mode: 'live' | 'offline' | 'local-simulation';
-  clusterVersion?: string;
+  mode: 'online' | 'offline';
+  engine: string;
+  message: string;
+  processedAt?: string;
+  apiLoadedAt?: string;
+  telemetryObservedAt?: string;
   activeNodes?: number;
-  nameNodeStatus?: string;
-  yarnStatus?: string;
-  message?: string;
-  hdfsUsedBytes?: number;
-  hdfsCapacityBytes?: number;
+  clusterVersion?: string;
+  hdfsStatus?: any;
+  yarnStatus?: any;
+}
+
+export interface PartitionOutputPreview {
+  job: string;
+  schema: string;
+  filePath: string;
+  fileName: string;
+  totalPartitions: number;
+  partitionFiles: string[];
+  fileSizeBytes: number;
+  sampleLinesCount: number;
+  sampleLines: string[];
 }

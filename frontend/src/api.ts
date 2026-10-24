@@ -2,19 +2,26 @@ import {
   OverviewData,
   PaginatedMovies,
   MovieSummary,
+  MovieDetail,
+  MovieComparisonResponse,
   GenreStats,
   RatingDistribution,
   RatingTrend,
   YearRating,
   HiddenGem,
-  HadoopJob,
+  HadoopJobsResponse,
   HadoopStatus,
-  DatasetInfo
+  DatasetInfo,
+  PartitionOutputPreview
 } from './types';
 
 const API_BASE = '';
 
-async function request<T>(endpoint: string, params?: Record<string, string | number | undefined>): Promise<T> {
+async function request<T>(
+  endpoint: string,
+  params?: Record<string, string | number | boolean | undefined>,
+  signal?: AbortSignal
+): Promise<T> {
   const url = new URL(`${API_BASE}${endpoint}`, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
@@ -27,51 +34,74 @@ async function request<T>(endpoint: string, params?: Record<string, string | num
   const res = await fetch(url.toString(), {
     headers: {
       'Accept': 'application/json'
-    }
+    },
+    signal
   });
 
   if (!res.ok) {
-    throw new Error(`API Request Failed: ${res.status} ${res.statusText}`);
+    const errorBody = await res.text().catch(() => '');
+    throw new Error(`API ${res.status}: ${res.statusText || errorBody || 'Request failed'}`);
   }
 
   return res.json();
 }
 
 export const api = {
-  getOverview: (): Promise<OverviewData> => request<OverviewData>('/api/overview'),
+  getOverview: (): Promise<OverviewData> =>
+    request<OverviewData>('/api/overview'),
 
   getMovies: (params?: {
     page?: number;
     pageSize?: number;
     search?: string;
     genre?: string;
+    genres?: string;
+    genreMode?: 'and' | 'or';
     minRating?: number;
     maxRating?: number;
     minCount?: number;
-    sortBy?: 'avgRating' | 'weightedRating' | 'ratingCount' | 'title';
+    minYear?: number;
+    maxYear?: number;
+    sortBy?: 'avgRating' | 'weightedRating' | 'ratingCount' | 'title' | 'year';
     sortOrder?: 'asc' | 'desc';
-  }): Promise<PaginatedMovies> => request<PaginatedMovies>('/api/movies', params),
+  }, signal?: AbortSignal): Promise<PaginatedMovies> =>
+    request<PaginatedMovies>('/api/movies', params, signal),
 
-  getMovie: (movieId: number): Promise<MovieSummary> => request<MovieSummary>(`/api/movies/${movieId}`),
+  getMovie: (movieId: number): Promise<MovieDetail> =>
+    request<MovieDetail>(`/api/movies/${movieId}`),
 
-  getGenres: (): Promise<GenreStats[]> => request<GenreStats[]>('/api/genres'),
+  compareMovies: (ids: number[]): Promise<MovieComparisonResponse> =>
+    request<MovieComparisonResponse>('/api/movies/compare', { ids: ids.join(',') }),
 
-  getRatingDistribution: (): Promise<RatingDistribution[]> => request<RatingDistribution[]>('/api/ratings/distribution'),
+  getGenres: (): Promise<GenreStats[]> =>
+    request<GenreStats[]>('/api/genres'),
 
-  getRatingTrends: (): Promise<RatingTrend[]> => request<RatingTrend[]>('/api/ratings/trends'),
+  getRatingDistribution: (): Promise<RatingDistribution[]> =>
+    request<RatingDistribution[]>('/api/ratings/distribution'),
 
-  getYearRatings: (): Promise<YearRating[]> => request<YearRating[]>('/api/ratings/years'),
+  getRatingTrends: (): Promise<RatingTrend[]> =>
+    request<RatingTrend[]>('/api/ratings/trends'),
+
+  getYearRatings: (): Promise<YearRating[]> =>
+    request<YearRating[]>('/api/ratings/years'),
 
   getHiddenGems: (params?: {
     limit?: number;
     minRating?: number;
+    minCount?: number;
     maxCount?: number;
-  }): Promise<HiddenGem[]> => request<HiddenGem[]>('/api/analytics/hidden-gems', params),
+  }): Promise<HiddenGem[]> =>
+    request<HiddenGem[]>('/api/analytics/hidden-gems', params),
 
-  getHadoopStatus: (): Promise<HadoopStatus> => request<HadoopStatus>('/api/hadoop/status'),
+  getHadoopStatus: (): Promise<HadoopStatus> =>
+    request<HadoopStatus>('/api/hadoop/status'),
 
-  getHadoopJobs: (): Promise<{ jobs: HadoopJob[]; mode: string; note: string }> =>
-    request<{ jobs: HadoopJob[]; mode: string; note: string }>('/api/hadoop/jobs'),
+  getHadoopJobs: (): Promise<HadoopJobsResponse> =>
+    request<HadoopJobsResponse>('/api/hadoop/jobs'),
 
-  getDatasetInfo: (): Promise<DatasetInfo> => request<DatasetInfo>('/api/dataset/info')
+  getPartitionOutputPreview: (job: string, lines: number = 25): Promise<PartitionOutputPreview> =>
+    request<PartitionOutputPreview>('/api/hadoop/output-preview', { job, lines }),
+
+  getDatasetInfo: (): Promise<DatasetInfo> =>
+    request<DatasetInfo>('/api/dataset/info')
 };

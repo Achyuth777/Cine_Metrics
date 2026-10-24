@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Tags,
   BarChart2,
@@ -6,7 +7,10 @@ import {
   Award,
   HelpCircle,
   TrendingUp,
-  Layers
+  Layers,
+  Info,
+  ArrowUpRight,
+  BookOpen
 } from 'lucide-react';
 import {
   BarChart,
@@ -25,6 +29,7 @@ import { LoadingSpinner, ErrorState } from '../components/LoadingState';
 export default function GenreAnalyticsPage() {
   const { data: genres, loading, error, refetch } = useApi(api.getGenres);
   const [selectedGenreName, setSelectedGenreName] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   if (loading) {
     return <LoadingSpinner text="Computing MapReduce distributed join across genres..." />;
@@ -34,103 +39,136 @@ export default function GenreAnalyticsPage() {
     return <ErrorState message={error || 'Failed to load genre analytics'} onRetry={refetch} />;
   }
 
-  // Sort genres by ratingCount descending for popularity
+  // Sort genres by ratingCount descending for volume/popularity
   const sortedByPopularity = [...genres].sort((a, b) => b.ratingCount - a.ratingCount);
 
-  // Sort genres by avgRating descending for quality
+  // Sort genres by avgRating descending for critical acclaim
   const sortedByAvgRating = [...genres].sort((a, b) => b.avgRating - a.avgRating);
 
   const selectedGenre = genres.find(g => g.genre === selectedGenreName) || sortedByPopularity[0];
 
+  const handleInspectInExplorer = (genreName: string) => {
+    navigate(`/movies?genre=${encodeURIComponent(genreName)}`);
+  };
+
   return (
-    <div className="space-y-6 max-w-7xl mx-auto animate-fade-in">
+    <div className="space-y-6 max-w-7xl mx-auto animate-fade-in pb-16">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-[#252538]">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#282A30]">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-            Genre Popularity & Rating Intelligence
-            <span className="text-xs px-2 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20 font-mono">
-              Job 4: Map-Side Join
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F4F4F5]">
+              Genre Intelligence & Popularity
+            </h1>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#F4B860]/10 text-[#F4B860] border border-[#F4B860]/30 font-mono font-medium">
+              Job 4: Join
             </span>
-          </h2>
-          <p className="text-xs text-[#9aa0b8] mt-0.5">
-            Distributed join between movie metadata and user ratings via Hadoop DistributedCache.
+          </div>
+          <p className="text-sm text-[#A1A1AA] mt-1">
+            Distributed join between movie metadata and audience ratings via Hadoop MapReduce.
           </p>
         </div>
       </div>
 
-      {/* High-level Genre Callouts */}
+      {/* 3 High-level Metric Banners */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-xl bg-[#161622] border border-[#252538] p-4 flex items-center gap-3">
-          <div className="p-3 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/20">
+        <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-4 flex items-center gap-3">
+          <div className="p-3 rounded-lg bg-[#F4B860]/10 text-[#F4B860] border border-[#F4B860]/20 shrink-0">
             <TrendingUp className="w-5 h-5" />
           </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-[#646a84]">Most Popular Genre</span>
-            <p className="text-base font-bold text-white mt-0.5">{sortedByPopularity[0]?.genre}</p>
-            <p className="text-[11px] text-[#9aa0b8]">
-              {sortedByPopularity[0]?.ratingCount.toLocaleString()} total ratings
+          <div className="min-w-0">
+            <span className="text-[10px] uppercase font-bold text-[#A1A1AA] tracking-wider block">
+              Most Watched Category
+            </span>
+            <p className="text-lg font-bold text-[#F4F4F5] truncate mt-0.5">
+              {sortedByPopularity[0]?.genre}
+            </p>
+            <p className="text-xs font-mono text-[#D4D4D8]">
+              {sortedByPopularity[0]?.ratingCount.toLocaleString()} ratings ({sortedByPopularity[0]?.movieCount} titles)
             </p>
           </div>
         </div>
 
-        <div className="rounded-xl bg-[#161622] border border-[#252538] p-4 flex items-center gap-3">
-          <div className="p-3 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-4 flex items-center gap-3">
+          <div className="p-3 rounded-lg bg-[#2DD4BF]/10 text-[#2DD4BF] border border-[#2DD4BF]/20 shrink-0">
             <Award className="w-5 h-5" />
           </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-[#646a84]">Highest Average Genre</span>
-            <p className="text-base font-bold text-white mt-0.5">{sortedByAvgRating[0]?.genre}</p>
-            <p className="text-[11px] text-[#9aa0b8]">
-              {sortedByAvgRating[0]?.avgRating.toFixed(2)} ★ mean audience score
+          <div className="min-w-0">
+            <span className="text-[10px] uppercase font-bold text-[#A1A1AA] tracking-wider block">
+              Highest Mean Rating
+            </span>
+            <p className="text-lg font-bold text-[#F4F4F5] truncate mt-0.5">
+              {sortedByAvgRating[0]?.genre}
+            </p>
+            <p className="text-xs font-mono text-[#2DD4BF]">
+              {sortedByAvgRating[0]?.avgRating.toFixed(2)} ★ ({sortedByAvgRating[0]?.ratingCount.toLocaleString()} ratings)
             </p>
           </div>
         </div>
 
-        <div className="rounded-xl bg-[#161622] border border-[#252538] p-4 flex items-center gap-3">
-          <div className="p-3 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+        <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-4 flex items-center gap-3">
+          <div className="p-3 rounded-lg bg-[#282A30] text-[#F4F4F5] border border-[#3A3D46] shrink-0">
             <Layers className="w-5 h-5" />
           </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-[#646a84]">Distinct Genres Analyzed</span>
-            <p className="text-base font-bold text-white mt-0.5">{genres.length} Categories</p>
-            <p className="text-[11px] text-[#9aa0b8]">Multi-label tags split in Mapper</p>
+          <div className="min-w-0">
+            <span className="text-[10px] uppercase font-bold text-[#A1A1AA] tracking-wider block">
+              Distinct Taxonomy
+            </span>
+            <p className="text-lg font-bold text-[#F4F4F5] truncate mt-0.5">
+              {genres.length} Genres
+            </p>
+            <p className="text-xs text-[#A1A1AA]">
+              Multi-label tokens split in Mapper
+            </p>
           </div>
         </div>
       </div>
 
+      {/* Educational Callout: Multi-Genre Taxonomy & MapReduce Join */}
+      <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-5 shadow-sm space-y-2">
+        <div className="flex items-center gap-2 text-xs font-semibold text-[#F4B860]">
+          <BookOpen className="w-4 h-4" />
+          <span>Academic Note for Viva: Multi-Genre Aggregation & Distributed Join</span>
+        </div>
+        <p className="text-xs text-[#D4D4D8] leading-relaxed">
+          In MovieLens, a single movie record typically spans multiple genres (e.g., <code className="text-[#F4B860] bg-[#14161B] px-1 py-0.5 rounded">Action|Adventure|Sci-Fi</code>).
+          In <strong>Job 4 (GenrePopularityJob.java)</strong>, the Mapper splits pipe-delimited genre tokens and emits a separate <code className="text-[#2DD4BF] bg-[#14161B] px-1 py-0.5 rounded">&lt;genre, (count, rating)&gt;</code> tuple for each genre label.
+          Consequently, the sum of genre movie counts (<span className="font-mono text-[#F4F4F5]">22,084</span>) exceeds unique catalog titles (<span className="font-mono text-[#F4F4F5]">9,742</span>). This multi-label attribution prevents undercounting complex cross-genre works.
+        </p>
+      </div>
+
       {/* 2 Comparison Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Genre Popularity Chart */}
+        {/* Rating Volume (Audience Popularity) */}
         <ChartCard
-          title="Genre Rating Volume (Audience Popularity)"
-          subtitle="Total review submissions per genre. Shows what audiences watch most."
+          title="Genre Rating Volume (Most Reviewed)"
+          subtitle="Total ratings accumulated per genre. Demonstrates mainstream audience engagement."
         >
-          <div className="h-80 w-full pt-2">
+          <div className="h-96 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={sortedByPopularity}
                 layout="vertical"
-                margin={{ top: 5, right: 20, left: 40, bottom: 5 }}
+                margin={{ top: 5, right: 20, left: 45, bottom: 5 }}
               >
-                <XAxis type="number" stroke="#646a84" fontSize={10} tickLine={false} />
+                <XAxis type="number" stroke="#A1A1AA" fontSize={10} tickLine={false} />
                 <YAxis
                   dataKey="genre"
                   type="category"
-                  stroke="#646a84"
+                  stroke="#A1A1AA"
                   fontSize={10}
                   tickLine={false}
-                  width={75}
+                  width={80}
                 />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: '#161622',
-                    border: '1px solid #252538',
+                    backgroundColor: '#191B20',
+                    border: '1px solid #3A3D46',
                     borderRadius: '8px',
-                    color: '#f1f1f8',
+                    color: '#F4F4F5',
                     fontSize: '12px'
                   }}
-                  formatter={(val: any) => [`${Number(val).toLocaleString()} ratings`, 'Total Ratings']}
+                  formatter={(val: any) => [`${Number(val).toLocaleString()} ratings`, 'Volume']}
                 />
                 <Bar
                   dataKey="ratingCount"
@@ -141,7 +179,7 @@ export default function GenreAnalyticsPage() {
                   {sortedByPopularity.map((entry) => (
                     <Cell
                       key={`pop-${entry.genre}`}
-                      fill={entry.genre === selectedGenre?.genre ? '#8b5cf6' : '#3b82f6'}
+                      fill={entry.genre === selectedGenre?.genre ? '#F4B860' : '#E5A74E'}
                       opacity={entry.genre === selectedGenre?.genre ? 1 : 0.75}
                     />
                   ))}
@@ -151,42 +189,42 @@ export default function GenreAnalyticsPage() {
           </div>
         </ChartCard>
 
-        {/* Genre Average Rating Comparison Chart */}
+        {/* Average Rating (Critical Acclaim) */}
         <ChartCard
           title="Genre Average Ratings (Critical Acclaim)"
-          subtitle="Mean star score (0 to 5) per genre. Shows critical appreciation."
+          subtitle="Mean audience score (0.5 to 5.0) per genre. Shows critical appreciation."
         >
-          <div className="h-80 w-full pt-2">
+          <div className="h-96 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={sortedByAvgRating}
                 layout="vertical"
-                margin={{ top: 5, right: 20, left: 40, bottom: 5 }}
+                margin={{ top: 5, right: 20, left: 45, bottom: 5 }}
               >
                 <XAxis
                   type="number"
                   domain={[2.5, 4.5]}
-                  stroke="#646a84"
+                  stroke="#A1A1AA"
                   fontSize={10}
                   tickLine={false}
                 />
                 <YAxis
                   dataKey="genre"
                   type="category"
-                  stroke="#646a84"
+                  stroke="#A1A1AA"
                   fontSize={10}
                   tickLine={false}
-                  width={75}
+                  width={80}
                 />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: '#161622',
-                    border: '1px solid #252538',
+                    backgroundColor: '#191B20',
+                    border: '1px solid #3A3D46',
                     borderRadius: '8px',
-                    color: '#f1f1f8',
+                    color: '#F4F4F5',
                     fontSize: '12px'
                   }}
-                  formatter={(val: any) => [`${Number(val).toFixed(2)} ★`, 'Average Rating']}
+                  formatter={(val: any) => [`${Number(val).toFixed(2)} ★`, 'Mean Score']}
                 />
                 <Bar
                   dataKey="avgRating"
@@ -197,7 +235,7 @@ export default function GenreAnalyticsPage() {
                   {sortedByAvgRating.map((entry) => (
                     <Cell
                       key={`avg-${entry.genre}`}
-                      fill={entry.genre === selectedGenre?.genre ? '#8b5cf6' : '#10b981'}
+                      fill={entry.genre === selectedGenre?.genre ? '#2DD4BF' : '#14B8A6'}
                       opacity={entry.genre === selectedGenre?.genre ? 1 : 0.75}
                     />
                   ))}
@@ -209,60 +247,75 @@ export default function GenreAnalyticsPage() {
       </div>
 
       {/* Genre Ranking Table */}
-      <div className="rounded-xl bg-[#161622] border border-[#252538] shadow-xl overflow-hidden">
-        <div className="p-4 bg-[#0d0d14] border-b border-[#252538] flex items-center justify-between">
+      <div className="rounded-xl bg-[#191B20] border border-[#282A30] shadow-sm overflow-hidden">
+        <div className="p-4 bg-[#14161B] border-b border-[#282A30] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-white">Genre Analytics Summary Table</h3>
-            <p className="text-xs text-[#9aa0b8] mt-0.5">
-              Distinguishing unique movie count from total ratings received (Job 4 output)
+            <h2 className="text-sm font-semibold text-[#F4F4F5]">Genre Analytics Summary Table</h2>
+            <p className="text-xs text-[#A1A1AA] mt-0.5">
+              Exact metrics emitted by Reducer partition: unique movie count, total rating volume, and mean rating.
             </p>
           </div>
-          <span className="text-xs font-mono text-violet-400">
-            {genres.length} Genres
+          <span className="text-xs font-mono text-[#F4B860]">
+            {genres.length} Categories
           </span>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-[#9aa0b8]">
-            <thead className="bg-[#0d0d14]/60 text-[11px] uppercase tracking-wider text-[#646a84] border-b border-[#252538]">
+          <table className="w-full text-left text-xs text-[#A1A1AA]">
+            <thead className="bg-[#14161B] text-[11px] uppercase tracking-wider text-[#A1A1AA] border-b border-[#282A30]">
               <tr>
                 <th className="py-3 px-4">Genre Category</th>
                 <th className="py-3 px-3 text-right">Unique Movie Count</th>
                 <th className="py-3 px-3 text-right">Total Ratings Processed</th>
                 <th className="py-3 px-3 text-right">Average Rating (★)</th>
                 <th className="py-3 px-4 text-center">Avg Ratings / Movie</th>
+                <th className="py-3 px-4 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#252538]">
+            <tbody className="divide-y divide-[#282A30]">
               {sortedByPopularity.map((g) => {
                 const ratingsPerMovie = g.movieCount > 0 ? (g.ratingCount / g.movieCount).toFixed(1) : '0';
+                const isSelected = g.genre === selectedGenre?.genre;
                 return (
                   <tr
                     key={g.genre}
                     onClick={() => setSelectedGenreName(g.genre)}
-                    className={`hover:bg-[#1c1c2e] transition-colors cursor-pointer ${
-                      g.genre === selectedGenre?.genre ? 'bg-violet-950/20' : ''
+                    className={`hover:bg-[#21242B] transition-standard cursor-pointer ${
+                      isSelected ? 'bg-[#F4B860]/5' : ''
                     }`}
                   >
-                    <td className="py-3 px-4 font-semibold text-white flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-violet-500" />
+                    <td className="py-3 px-4 font-semibold text-[#F4F4F5] flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-[#F4B860]' : 'bg-[#282A30]'}`} />
                       {g.genre}
                     </td>
 
-                    <td className="py-3 px-3 text-right font-mono text-cyan-300 font-medium">
+                    <td className="py-3 px-3 text-right font-mono text-[#D4D4D8] font-medium tabular-nums">
                       {g.movieCount.toLocaleString()}
                     </td>
 
-                    <td className="py-3 px-3 text-right font-mono text-violet-300 font-bold">
+                    <td className="py-3 px-3 text-right font-mono text-[#F4F4F5] font-bold tabular-nums">
                       {g.ratingCount.toLocaleString()}
                     </td>
 
-                    <td className="py-3 px-3 text-right font-mono font-bold text-amber-400">
+                    <td className="py-3 px-3 text-right font-mono font-bold text-[#F4B860] tabular-nums">
                       {g.avgRating.toFixed(2)} ★
                     </td>
 
-                    <td className="py-3 px-4 text-center font-mono text-[#9aa0b8]">
+                    <td className="py-3 px-4 text-center font-mono text-[#A1A1AA] tabular-nums">
                       {ratingsPerMovie}x
+                    </td>
+
+                    <td className="py-3 px-4 text-right">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleInspectInExplorer(g.genre);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#14161B] hover:bg-[#282A30] text-[#D4D4D8] hover:text-[#F4B860] border border-[#282A30] text-[11px] font-medium transition-standard"
+                      >
+                        Browse <ArrowUpRight className="w-3 h-3" />
+                      </button>
                     </td>
                   </tr>
                 );

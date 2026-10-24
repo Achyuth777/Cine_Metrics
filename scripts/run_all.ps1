@@ -13,19 +13,25 @@ Write-Host "====================================================================
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 
-# Step 1: Ensure MapReduce data outputs exist
-Write-Host "`n[1/3] Checking MapReduce Processed Datasets..." -ForegroundColor Yellow
-if (-not (Test-Path "$projectRoot\data\processed\movies.json")) {
-    Write-Host "  → Processing MovieLens dataset via local MapReduce pipeline..." -ForegroundColor Gray
-    python "$projectRoot\scripts\process_dataset.py"
-} else {
-    Write-Host "  ✓ Processed MapReduce datasets verified." -ForegroundColor Green
+# Locate Python executable
+$pythonExe = "python"
+if (Test-Path "$env:LOCALAPPDATA\Python\pythoncore-3.14-64\python.exe") {
+    $pythonExe = "$env:LOCALAPPDATA\Python\pythoncore-3.14-64\python.exe"
 }
 
-# Step 2: Start Backend API in background job or process
+# Step 1: Ensure MapReduce data outputs exist
+Write-Host "`n[1/3] Checking MapReduce Processed Datasets..." -ForegroundColor Yellow
+if (-not (Test-Path "$projectRoot\data\processed\avgrating\part-r-00000")) {
+    Write-Host "  → Processing MovieLens dataset via Python reference pipeline..." -ForegroundColor Gray
+    & $pythonExe "$projectRoot\scripts\process_dataset.py"
+} else {
+    Write-Host "  ✓ Verified MapReduce output partitions present in data/processed/." -ForegroundColor Green
+}
+
+# Step 2: Start Backend API
 Write-Host "`n[2/3] Launching FastAPI Backend on http://localhost:8000..." -ForegroundColor Yellow
-$backendProcess = Start-Process -FilePath "python" -ArgumentList "$projectRoot\scripts\start_backend.py" -PassThru
-Write-Host "  ✓ Backend started (PID: $($backendProcess.Id)). Swagger UI at http://localhost:8000/docs" -ForegroundColor Green
+$backendProcess = Start-Process -FilePath $pythonExe -ArgumentList "$projectRoot\scripts\start_backend.py" -PassThru
+Write-Host "  ✓ Backend started (PID: $($backendProcess.Id)). Swagger UI: http://localhost:8000/docs" -ForegroundColor Green
 
 # Step 3: Start React Frontend in dev mode
 Write-Host "`n[3/3] Launching React Analytics Dashboard on http://localhost:5173..." -ForegroundColor Yellow

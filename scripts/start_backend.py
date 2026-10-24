@@ -4,10 +4,10 @@
 CineMetrics — Backend Launcher Script
 ==============================================================================
 Initializes data loader and launches Uvicorn server on port 8000.
+Listens on 0.0.0.0 to enable local network access and local demonstration.
 """
 
 import sys
-import subprocess
 from pathlib import Path
 
 # Add backend directory to sys.path
@@ -22,4 +22,10 @@ if __name__ == "__main__":
     print("  Swagger UI Documentation: http://localhost:8000/docs")
     print("=" * 60)
 
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False, app_dir=str(backend_dir))
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+        app_dir=str(backend_dir)
+    )

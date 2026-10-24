@@ -21,132 +21,132 @@ const pipelineStages = [
     step: 1,
     title: 'MovieLens CSV',
     desc: 'Raw Data Source',
-    detail: 'ratings.csv (100k lines) and movies.csv (9.7k lines) with schema: userId, movieId, rating, timestamp.'
+    detail: 'ratings.csv (100,836 rows) and movies.csv (9,742 rows) with schema: userId, movieId, rating, timestamp.'
   },
   {
     step: 2,
     title: 'HDFS Ingestion',
     desc: 'Distributed Storage',
-    detail: 'Files partitioned into 128MB blocks across DataNodes with metadata maintained by the NameNode.'
+    detail: 'Raw CSVs uploaded into HDFS directory /cinemetrics/input with 128MB block partitions managed by the NameNode.'
   },
   {
     step: 3,
     title: 'InputSplit & Mapper',
     desc: 'Parallel Parsing',
-    detail: 'InputFormat splits files by line. Mapper parses CSV, validates types, and emits Key-Value pairs: (movieId, rating).'
+    detail: 'TextInputFormat creates splits line-by-line. The Mapper parses tokens, validates half-star values, and emits (movieId, rating).'
   },
   {
     step: 4,
     title: 'Combiner (Local)',
     desc: 'Mini-Reducer',
-    detail: 'Aggregates partial sums on the map node itself (e.g. sum, count) to minimize network shuffle I/O.'
+    detail: 'Aggregates partial sums on the map worker node before shuffle, emitting (partialSum, partialCount) to minimize network I/O.'
   },
   {
     step: 5,
     title: 'Shuffle & Sort',
     desc: 'Network Partitioning',
-    detail: 'Hadoop partitioner hashes keys to assign partitions. Framework groups all values for each key: (movieId, [r1, r2, ...]).'
+    detail: 'HashPartitioner routes intermediate keys across reducers. The framework groups values: (movieId, [partialSums...]).'
   },
   {
     step: 6,
     title: 'Reducer',
     desc: 'Global Aggregation',
-    detail: 'Reducer computes sum / count = averageRating. Writes result to HDFS part-r-00000 TSV output.'
+    detail: 'Reducer accumulates all partial sums and counts, computes exact average = sum / count, and writes part-r-00000 TSV files.'
   },
   {
     step: 7,
     title: 'FastAPI Backend',
     desc: 'Analytics Service',
-    detail: 'Loads MapReduce part-files, indexes lookups, applies Bayesian damping, and exposes REST endpoints.'
+    detail: 'Loads all partition files into memory, caches indices, computes Bayesian weighted scores, and serves OpenAPI endpoints.'
   },
   {
     step: 8,
     title: 'React Dashboard',
     desc: 'CineMetrics UI',
-    detail: 'Displays interactive charts, movie explorer, and cluster health for demonstration and viva grading.'
+    detail: 'Renders interactive visualizations, movie explorer, side-by-side comparison, and cluster telemetry for viva evaluation.'
   }
 ];
 
 const vivaQuestions = [
   {
-    q: "1. What is Big Data, and how does MovieLens qualify?",
-    a: "Big Data refers to datasets whose volume, velocity, and variety exceed traditional relational database processing capabilities. While MovieLens 100k is used for rapid testing, MovieLens scales to 32M+ records where single-machine memory fails, necessitating distributed file systems and batch processing frameworks like Hadoop."
+    q: "1. What is Big Data, and how does the MovieLens analytics task qualify?",
+    a: "Big Data refers to datasets whose volume, velocity, and variety exceed traditional single-node database processing capabilities. While MovieLens Latest-Small (100k ratings) allows rapid development and testing, the MovieLens architecture scales to 32M+ ratings (over 1 GB compressed). At that scale, single-machine in-memory processing becomes a bottleneck, necessitating distributed storage (HDFS) and distributed parallel processing (Hadoop MapReduce)."
   },
   {
-    q: "2. What are the 5 Vs of Big Data?",
-    a: "1. Volume (size of data), 2. Velocity (speed of data generation), 3. Variety (structured CSVs, unstructured text/tags), 4. Veracity (data quality, missing records, invalid timestamps), 5. Value (extracting actionable audience insights like hidden gems)."
+    q: "2. What are the 5 Vs of Big Data in the context of CineMetrics?",
+    a: "1. Volume: 100,836 ratings scaling to 32M records. 2. Velocity: Continuous stream of user ratings and reviews over time. 3. Variety: Structured tabular CSVs, pipe-delimited multi-label genres, and unstructured free-text user tags. 4. Veracity: Handling corrupt records, unrated films, missing release years, and trailing commas. 5. Value: Discovering audience sentiment, identifying overlooked hidden gems, and computing fair Bayesian rankings."
   },
   {
-    q: "3. What is the fundamental architecture of HDFS?",
-    a: "HDFS uses a master-worker architecture. The NameNode (Master) manages the filesystem namespace, directory tree, and block mappings. The DataNodes (Workers) store actual data blocks (default 128MB) and execute read/write operations requested by clients."
+    q: "3. What is the fundamental master-worker architecture of HDFS?",
+    a: "HDFS uses a master-worker design. The NameNode acts as the master daemon, maintaining the filesystem namespace, directory tree, and the mapping of file blocks to DataNodes entirely in memory (persisted via fsimage and edits log). The DataNodes are worker daemons running on commodity hardware that store actual 128MB block replicas and execute block read/write operations."
   },
   {
-    q: "4. What happens if a DataNode crashes in Hadoop?",
-    a: "HDFS is fault-tolerant through block replication (default factor 3). DataNodes send periodic heartbeats to the NameNode. If heartbeats stop for 10 minutes, the NameNode marks the node dead and automatically replicates missing blocks onto healthy DataNodes from existing replicas."
+    q: "4. What happens if a DataNode crashes in our Hadoop cluster?",
+    a: "HDFS is fault-tolerant through block replication (default replication factor = 3). DataNodes send periodic heartbeats (default every 3 seconds) to the NameNode. If heartbeats cease for 10 minutes, the NameNode marks that DataNode as dead. The NameNode inspects its block map, identifies under-replicated blocks, and automatically commands healthy DataNodes to replicate those blocks to restore the replication factor."
   },
   {
-    q: "5. What is the role of YARN in Hadoop?",
-    a: "YARN (Yet Another Resource Negotiator) decouples resource management from processing. The ResourceManager allocates cluster CPU and memory, while NodeManagers run on worker nodes to monitor containers. The ApplicationMaster negotiates containers for a specific job."
+    q: "5. What is the role of YARN in Apache Hadoop 3.x?",
+    a: "YARN (Yet Another Resource Negotiator) decouples cluster resource management from the MapReduce processing model. The central ResourceManager allocates cluster-wide CPU cores and RAM memory. On each worker node, a NodeManager monitors container resource consumption. When a job is submitted, an ApplicationMaster container is launched to negotiate resources with the ResourceManager and supervise task execution."
   },
   {
-    q: "6. Explain the Mapper phase in our AverageRatingJob.",
-    a: "The Mapper reads one line of ratings.csv at a time. It uses CSVParser to extract movieId and rating, validates their types, and emits Key: movieId (IntWritable) and Value: rating (Text 'rating,1')."
+    q: "6. Explain the Mapper implementation in Job 1 (AverageMovieRating).",
+    a: "In AverageRatingJob.java, the Mapper extends Mapper<LongWritable, Text, IntWritable, Text>. It reads each line of ratings.csv, skips the header row, parses the CSV tokens with CSVParser, extracts movieId and rating, and emits Key: movieId (IntWritable) and Value: 'rating,1' (Text). It handles malformed lines gracefully by logging to standard error without failing the container."
   },
   {
-    q: "7. Why did we use a Combiner in our MapReduce jobs?",
-    a: "A Combiner runs locally on each mapper node before network transfer. Instead of emitting 100 separate ratings for Toy Story across the network, the combiner sums them to (sum=410, count=100) and emits just one record. This dramatically cuts network shuffle saturation."
+    q: "7. Why did we implement a Combiner in our MapReduce jobs?",
+    a: "A Combiner acts as a localized 'mini-reducer' that runs on the mapper node prior to the network shuffle phase. If Movie 1 receives 1,000 ratings on a single mapper split, emitting 1,000 individual pairs across the network would choke the network switch. The Combiner aggregates them into a single intermediate pair (sum=4120.0, count=1000), reducing network shuffle traffic by over 95%."
   },
   {
-    q: "8. Can a Combiner always be used for Average calculation?",
-    a: "No! Average is NOT associative: Avg(Avg(A), Avg(B)) ≠ Avg(A, B). Therefore, the Combiner must emit (sum, count) pairs rather than averages, allowing the Reducer to correctly compute globalSum / globalCount."
+    q: "8. Can a Combiner compute average directly? Why or why not?",
+    a: "No! The arithmetic mean is NOT an associative or commutative aggregation: Avg(Avg(A), Avg(B)) ≠ Avg(A, B) when sample sizes differ. If Combiner 1 averages 2 ratings (mean 4.0) and Combiner 2 averages 8 ratings (mean 2.0), averaging (4.0 + 2.0)/2 yields 3.0, whereas the true average is (8 + 16)/10 = 2.40. Therefore, the Combiner MUST emit (sum, count) pairs, allowing the Reducer to compute totalSum / totalCount."
   },
   {
-    q: "9. How does Hadoop perform the Shuffle and Sort phase?",
-    a: "Between Map and Reduce, Hadoop partitions map output keys using HashPartitioner: (hash(key) & Integer.MAX_VALUE) % numReducers. It then sorts intermediate records by key so each Reducer receives an iterator of all values belonging to its assigned keys."
+    q: "9. How does Hadoop perform the Shuffle and Sort phase between Mapper and Reducer?",
+    a: "After the Map phase, Hadoop uses HashPartitioner to determine which Reducer processes which key: (hash(key) & Integer.MAX_VALUE) % numReducers. Intermediate pairs are written to a ring buffer in RAM (default 100MB) and spilled to disk sorted by key. During the merge/sort step, all values for a given key are merged so that each Reducer receives a key and an Iterable of all values for that key."
   },
   {
-    q: "10. How did you join movies.csv and ratings.csv in GenrePopularityJob?",
-    a: "We used a Map-Side Join using Hadoop's DistributedCache. The small movies.csv (494 KB) is loaded into RAM inside the Mapper's setup() method. As ratings.csv streams through the map() method, the mapper looks up the movie's genres instantly in memory with zero shuffle overhead."
+    q: "10. How did you join movies.csv with ratings.csv in Job 4 (GenrePopularity)?",
+    a: "We implemented a Map-Side Join using Hadoop's DistributedCache. Because movies.csv is small (494 KB), it is distributed to all worker nodes via Job.addCacheFile(). In the Mapper's setup() method, movies.csv is read into a Java HashMap in memory. When ratings.csv is processed in the map() method, the mapper looks up the movie's title and genres in RAM in O(1) time with ZERO network shuffle cost."
   },
   {
     q: "11. What is the difference between a Map-Side Join and a Reduce-Side Join?",
-    a: "In a Map-Side Join, one dataset is small enough to fit in memory (DistributedCache), avoiding data shuffle. In a Reduce-Side Join, both large datasets are tagged and sent through the shuffle to the Reducer, which is heavier on network I/O but works for datasets of any size."
+    a: "In a Map-Side Join, at least one dataset is small enough to fit in mapper memory (DistributedCache), avoiding data shuffle entirely. In a Reduce-Side Join, both large datasets are tagged with their source in the Mapper, sent across the network through the shuffle phase, and joined inside the Reducer. Reduce-Side Join is heavier on network I/O but works for datasets of arbitrary size."
   },
   {
-    q: "12. What is the Bayesian Weighted Rating formula in Job 6 (Hidden Gems)?",
-    a: "WR = (v / (v + m)) * R + (m / (v + m)) * C, where v = movie rating count, R = movie average rating, m = minimum votes threshold (e.g. 10), and C = global dataset mean rating (3.50). It penalizes movies with only 1 rating of 5.0 from dominating the top rankings."
+    q: "12. What is the Bayesian Weighted Rating formula used in Job 6 (Hidden Gems)?",
+    a: "WR = (v / (v + m)) * R + (m / (v + m)) * C, where v = movie rating count, R = movie average rating, m = minimum votes threshold (10), and C = global dataset mean rating (3.50 ★). It prevents movies with only 1 or 2 perfect reviews from unfairly outranking well-established cinema classics with hundreds of ratings."
   },
   {
-    q: "13. How does our project handle malformed CSV rows?",
-    a: "Our CSVParser checks for proper token counts, skips the CSV header row automatically, handles quoted commas in movie titles like 'Lord of the Rings, The (2001)', and logs skipped corrupt rows to standard error without crashing the Hadoop container."
+    q: "13. How does our Hadoop pipeline handle malformed CSV rows?",
+    a: "Our Java CSVParser correctly handles quoted commas in movie titles (e.g., 'Lord of the Rings, The (2001)'), verifies that the line contains the required number of columns, checks for numeric parsing errors, skips empty lines, and ignores the CSV header row. Malformed rows increment a Hadoop Counter and log a warning without terminating the job."
   },
   {
-    q: "14. How do you distinguish movie release year from rating timestamp?",
-    a: "Job 5 parses the movie title using a regular expression r'\\((\\d{4})\\)' to extract the release year. Job 7 parses the Unix epoch timestamp column in ratings.csv and converts it to YYYY-MM to track user submission activity across calendar years."
+    q: "14. How do you distinguish movie release year from the rating timestamp?",
+    a: "Job 5 parses the movie title using a regular expression r'\\((\\d{4})\\)' to extract the theatrical release year (e.g. 1995 for Toy Story). Job 7 parses the Unix epoch timestamp column (e.g. 964982703) in ratings.csv and converts it to YYYY-MM to track platform reviewing activity across calendar years (1996–2018)."
   },
   {
-    q: "15. What are the key limitations of Hadoop MapReduce?",
-    a: "MapReduce writes intermediate results to local disk and final results to HDFS, incurring high disk I/O. It lacks support for in-memory iterative computing (which Apache Spark solves) and is optimized for batch rather than real-time streaming."
+    q: "15. What are the main limitations of Hadoop MapReduce?",
+    a: "1. High Disk I/O: MapReduce spills intermediate records to local disk and writes final output to HDFS. 2. Lack of in-memory caching: Iterative algorithms (e.g., machine learning) must reload data from disk on every iteration (which Apache Spark solves). 3. High startup latency: JVM startup and container allocation make MapReduce unsuitable for interactive real-time queries."
   },
   {
-    q: "16. Why does Hadoop use Data Locality?",
-    a: "Moving computation to data is vastly cheaper than moving data to computation. YARN schedules map tasks on the exact DataNode physical machine where that HDFS block resides (Rack/Node local), eliminating network file transfer."
+    q: "16. Why is Data Locality fundamental to Hadoop's performance?",
+    a: "In big data systems, moving computation to data is vastly faster and cheaper than moving data to computation over the network. YARN schedules map tasks directly on the DataNode physical machine where that HDFS block resides (Rack/Node Locality), achieving maximum read throughput from local disk."
   },
   {
     q: "17. What is the difference between HDFS block size and OS block size?",
-    a: "Operating system blocks are typically 4KB. HDFS blocks are 128MB or 256MB. A large block size minimizes the cost of disk seeks and reduces the memory footprint of metadata stored in the NameNode's RAM."
+    a: "Operating system blocks are typically 4KB (optimized for small files and random I/O). HDFS blocks are 128MB or 256MB. A large block size amortizes disk seek time over a large sequential read and minimizes the memory footprint of metadata stored in the NameNode's RAM (each block consumes ~150 bytes in NameNode memory)."
   },
   {
     q: "18. How did you verify that MapReduce outputs are genuine?",
-    a: "We verified the output partitions (part-r-00000) generated by Hadoop against deterministic test cases and reference aggregations. The dashboard reads these exact partition files via the FastAPI backend without any fabricated random data."
+    a: "All 7 MapReduce jobs compile to a verified Uber-JAR (cinemetrics-mapreduce-1.0.0.jar) using Maven. We verified the output partition files (part-r-00000) against deterministic unit tests (MapReduceUnitTest.java). The CineMetrics dashboard directly reads these exact partition files via the FastAPI data_loader."
   },
   {
     q: "19. What is secondary sorting in MapReduce?",
-    a: "Secondary sorting allows MapReduce to sort values associated with a key before reaching the Reducer. It uses a composite key (e.g., NaturalKey + Value) and a custom Partitioner and GroupingComparator."
+    a: "Secondary sorting allows MapReduce to sort the values associated with a key before they reach the Reducer. It is achieved by creating a composite key (e.g., NaturalKey + SecondaryValue), implementing a custom Partitioner (which hashes only the NaturalKey), and writing a GroupingComparator (which groups by NaturalKey)."
   },
   {
-    q: "20. How would you scale CineMetrics to MovieLens 32M?",
-    a: "Because our MapReduce jobs are designed with distributed partitioning, scaling to MovieLens 32M only requires increasing the HDFS cluster storage and YARN worker containers. The Java algorithms remain unchanged."
+    q: "20. How would you scale CineMetrics from MovieLens 100K to MovieLens 32M?",
+    a: "Because our MapReduce jobs are designed with distributed partitioning, scaling to MovieLens 32M requires zero code changes. We upload the 32M CSV to HDFS, increase the number of YARN worker containers, set numReduceTasks proportionally (e.g., 10–20 reducers), and submit the existing Uber-JAR to the cluster."
   }
 ];
 
@@ -155,37 +155,39 @@ export default function ArchitecturePage() {
   const [expandedQ, setExpandedQ] = useState<number | null>(null);
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto animate-fade-in pb-12">
+    <div className="space-y-8 max-w-7xl mx-auto animate-fade-in pb-16">
       {/* Header */}
-      <div className="pb-4 border-b border-[#252538]">
+      <div className="pb-4 border-b border-[#282A30]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              System Architecture & Viva Examination Guide
-              <span className="text-xs px-2.5 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20 font-mono">
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F4F4F5]">
+                System Architecture & Viva Defense
+              </h1>
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#F4B860]/10 text-[#F4B860] border border-[#F4B860]/30 font-mono font-medium">
                 SRM IST 21CSC314P
               </span>
-            </h2>
-            <p className="text-xs text-[#9aa0b8] mt-1">
-              Comprehensive explanation of distributed processing, MapReduce internals, and academic defense questions.
+            </div>
+            <p className="text-sm text-[#A1A1AA] mt-1">
+              Internal mechanics of Hadoop distributed processing, MapReduce execution lifecycle, and viva examination defense.
             </p>
           </div>
           <div className="text-right text-xs">
-            <span className="text-[#646a84]">Student Developer:</span>
-            <p className="text-white font-semibold">Achyuth PV (SRM Ramapuram)</p>
+            <span className="text-[#A1A1AA]">Student Developer:</span>
+            <p className="text-[#F4F4F5] font-semibold">Achyuth PV (SRM Ramapuram)</p>
           </div>
         </div>
       </div>
 
       {/* 8-Stage Pipeline Interactive Flowchart */}
-      <div className="rounded-xl bg-[#161622] border border-[#252538] p-6 shadow-xl space-y-5">
+      <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-6 shadow-sm space-y-5">
         <div>
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <GitBranch className="w-4 h-4 text-violet-400" />
-            End-to-End Hadoop Distributed Pipeline (Click any stage to inspect)
-          </h3>
-          <p className="text-xs text-[#9aa0b8] mt-0.5">
-            Traces the complete lifecycle of movie ratings from raw CSV ingestion to frontend intelligence.
+          <h2 className="text-sm font-bold text-[#F4F4F5] flex items-center gap-2">
+            <GitBranch className="w-4 h-4 text-[#F4B860]" />
+            End-to-End Hadoop Distributed Pipeline (Click any stage to inspect internals)
+          </h2>
+          <p className="text-xs text-[#A1A1AA] mt-0.5">
+            Traces the complete lifecycle of movie ratings from raw CSV ingestion to React analytical visualization.
           </p>
         </div>
 
@@ -197,67 +199,67 @@ export default function ArchitecturePage() {
               <button
                 key={stage.step}
                 onClick={() => setActiveStep(stage.step)}
-                className={`p-3 rounded-xl border text-left transition-all ${
+                className={`p-3 rounded-xl border text-left transition-standard ${
                   isSelected
-                    ? 'bg-violet-600/20 border-violet-500 shadow-md shadow-violet-600/20'
-                    : 'bg-[#0d0d14] border-[#252538] hover:border-[#3b3b58]'
+                    ? 'bg-[#F4B860]/10 border-[#F4B860] shadow-sm'
+                    : 'bg-[#14161B] border-[#282A30] hover:border-[#3A3D46]'
                 }`}
               >
-                <span className="text-[10px] font-mono font-bold text-violet-400 block mb-1">
+                <span className="text-[10px] font-mono font-bold text-[#F4B860] block mb-1">
                   STAGE 0{stage.step}
                 </span>
-                <p className="text-xs font-bold text-white leading-tight truncate">{stage.title}</p>
-                <p className="text-[10px] text-[#646a84] mt-1 truncate">{stage.desc}</p>
+                <p className="text-xs font-bold text-[#F4F4F5] leading-tight truncate">{stage.title}</p>
+                <p className="text-[10px] text-[#A1A1AA] mt-1 truncate">{stage.desc}</p>
               </button>
             );
           })}
         </div>
 
         {/* Selected Stage Detail Inspector */}
-        <div className="rounded-xl bg-[#0d0d14] border border-violet-500/30 p-4 animate-fade-in">
-          <div className="flex items-center gap-2 text-violet-400 text-xs font-bold font-mono uppercase">
+        <div className="rounded-xl bg-[#14161B] border border-[#F4B860]/30 p-4 animate-fade-in">
+          <div className="flex items-center gap-2 text-[#F4B860] text-xs font-bold font-mono uppercase">
             <Sparkles className="w-4 h-4" />
             <span>Deep Dive: Stage {activeStep} — {pipelineStages[activeStep - 1].title} ({pipelineStages[activeStep - 1].desc})</span>
           </div>
-          <p className="text-xs text-[#f1f1f8] mt-2 leading-relaxed">
+          <p className="text-xs text-[#F4F4F5] mt-2 leading-relaxed">
             {pipelineStages[activeStep - 1].detail}
           </p>
         </div>
       </div>
 
-      {/* Worked Numerical Example for Viva */}
-      <div className="rounded-xl bg-[#161622] border border-[#252538] p-6 shadow-xl space-y-5">
+      {/* Worked Numerical Example for Viva Voce */}
+      <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-6 shadow-sm space-y-5">
         <div>
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <Layers className="w-4 h-4 text-emerald-400" />
-            Worked MapReduce Numerical Example (5 Movie Ratings)
-          </h3>
-          <p className="text-xs text-[#9aa0b8] mt-0.5">
-            Step-by-step mathematical trace to explain how average rating calculation works in a viva examination.
+          <h2 className="text-sm font-bold text-[#F4F4F5] flex items-center gap-2">
+            <Layers className="w-4 h-4 text-[#2DD4BF]" />
+            Worked MapReduce Numerical Trace (5 Movie Ratings)
+          </h2>
+          <p className="text-xs text-[#A1A1AA] mt-0.5">
+            Step-by-step mathematical trace demonstrating exact data transformation through Map, Shuffle, and Reduce.
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs font-mono">
           {/* Step A: Raw Input */}
-          <div className="rounded-xl bg-[#0d0d14] border border-[#252538] p-4 space-y-2">
-            <span className="text-[10px] text-[#646a84] uppercase font-bold tracking-wider block">
+          <div className="rounded-xl bg-[#14161B] border border-[#282A30] p-4 space-y-2">
+            <span className="text-[10px] text-[#A1A1AA] uppercase font-bold tracking-wider block">
               1. Input Records (ratings.csv)
             </span>
-            <div className="space-y-1 text-[#9aa0b8] text-[11px]">
-              <p>User 1, Movie 1 → <strong className="text-white">4.0 ★</strong></p>
-              <p>User 2, Movie 1 → <strong className="text-white">5.0 ★</strong></p>
-              <p>User 3, Movie 2 → <strong className="text-white">3.0 ★</strong></p>
-              <p>User 4, Movie 1 → <strong className="text-white">4.5 ★</strong></p>
-              <p>User 5, Movie 2 → <strong className="text-white">4.0 ★</strong></p>
+            <div className="space-y-1 text-[#A1A1AA] text-[11px]">
+              <p>User 1, Movie 1 → <strong className="text-[#F4F4F5]">4.0 ★</strong></p>
+              <p>User 2, Movie 1 → <strong className="text-[#F4F4F5]">5.0 ★</strong></p>
+              <p>User 3, Movie 2 → <strong className="text-[#F4F4F5]">3.0 ★</strong></p>
+              <p>User 4, Movie 1 → <strong className="text-[#F4F4F5]">4.5 ★</strong></p>
+              <p>User 5, Movie 2 → <strong className="text-[#F4F4F5]">4.0 ★</strong></p>
             </div>
           </div>
 
           {/* Step B: Map Phase */}
-          <div className="rounded-xl bg-[#0d0d14] border border-[#252538] p-4 space-y-2">
-            <span className="text-[10px] text-violet-400 uppercase font-bold tracking-wider block">
+          <div className="rounded-xl bg-[#14161B] border border-[#282A30] p-4 space-y-2">
+            <span className="text-[10px] text-[#F4B860] uppercase font-bold tracking-wider block">
               2. Mapper Emit (Key → Val)
             </span>
-            <div className="space-y-1 text-violet-300 text-[11px]">
+            <div className="space-y-1 text-[#F4B860] text-[11px]">
               <p>1 → (4.0, 1)</p>
               <p>1 → (5.0, 1)</p>
               <p>2 → (3.0, 1)</p>
@@ -267,29 +269,29 @@ export default function ArchitecturePage() {
           </div>
 
           {/* Step C: Shuffle & Sort */}
-          <div className="rounded-xl bg-[#0d0d14] border border-[#252538] p-4 space-y-2">
-            <span className="text-[10px] text-blue-400 uppercase font-bold tracking-wider block">
+          <div className="rounded-xl bg-[#14161B] border border-[#282A30] p-4 space-y-2">
+            <span className="text-[10px] text-[#2DD4BF] uppercase font-bold tracking-wider block">
               3. Shuffle & Group by Key
             </span>
-            <div className="space-y-2 text-blue-300 text-[11px]">
+            <div className="space-y-2 text-[#2DD4BF] text-[11px]">
               <p>Key 1: [(4.0, 1), (5.0, 1), (4.5, 1)]</p>
               <p>Key 2: [(3.0, 1), (4.0, 1)]</p>
             </div>
           </div>
 
           {/* Step D: Reducer */}
-          <div className="rounded-xl bg-[#0d0d14] border border-emerald-500/30 p-4 space-y-2">
+          <div className="rounded-xl bg-[#14161B] border border-emerald-500/30 p-4 space-y-2">
             <span className="text-[10px] text-emerald-400 uppercase font-bold tracking-wider block">
               4. Reducer Final Output
             </span>
             <div className="space-y-2 text-emerald-300 text-[11px]">
               <div>
-                <p className="font-bold text-white">Movie 1: Avg 4.50 ★</p>
-                <p className="text-[10px] text-[#646a84]">Sum: 13.5 / Count: 3</p>
+                <p className="font-bold text-[#F4F4F5]">Movie 1: Avg 4.50 ★</p>
+                <p className="text-[10px] text-[#A1A1AA]">Sum: 13.5 / Count: 3</p>
               </div>
               <div>
-                <p className="font-bold text-white">Movie 2: Avg 3.50 ★</p>
-                <p className="text-[10px] text-[#646a84]">Sum: 7.0 / Count: 2</p>
+                <p className="font-bold text-[#F4F4F5]">Movie 2: Avg 3.50 ★</p>
+                <p className="text-[10px] text-[#A1A1AA]">Sum: 7.0 / Count: 2</p>
               </div>
             </div>
           </div>
@@ -298,63 +300,63 @@ export default function ArchitecturePage() {
 
       {/* Core Academic Theory Reference */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="rounded-xl bg-[#161622] border border-[#252538] p-5 space-y-3">
-          <div className="flex items-center gap-2 text-violet-400">
+        <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-5 space-y-3">
+          <div className="flex items-center gap-2 text-[#F4B860]">
             <Database className="w-4 h-4" />
-            <h4 className="text-xs font-bold uppercase tracking-wider text-white">The 5 Vs of Big Data</h4>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#F4F4F5]">The 5 Vs of Big Data</h3>
           </div>
-          <ul className="text-xs text-[#9aa0b8] space-y-2 leading-relaxed">
-            <li><strong className="text-white">Volume:</strong> 100k to 32M+ rating rows.</li>
-            <li><strong className="text-white">Velocity:</strong> High-throughput streaming reviews.</li>
-            <li><strong className="text-white">Variety:</strong> Structured CSV, user free-text tags.</li>
-            <li><strong className="text-white">Veracity:</strong> Handling corrupted ratings and timestamps.</li>
-            <li><strong className="text-white">Value:</strong> Discovering high-quality hidden gems.</li>
+          <ul className="text-xs text-[#A1A1AA] space-y-2 leading-relaxed">
+            <li><strong className="text-[#F4F4F5]">Volume:</strong> 100k to 32M+ rating rows.</li>
+            <li><strong className="text-[#F4F4F5]">Velocity:</strong> High-throughput streaming reviews.</li>
+            <li><strong className="text-[#F4F4F5]">Variety:</strong> Structured CSVs, user free-text tags.</li>
+            <li><strong className="text-[#F4F4F5]">Veracity:</strong> Handling corrupted ratings and timestamps.</li>
+            <li><strong className="text-[#F4F4F5]">Value:</strong> Discovering high-quality hidden gems.</li>
           </ul>
         </div>
 
-        <div className="rounded-xl bg-[#161622] border border-[#252538] p-5 space-y-3">
-          <div className="flex items-center gap-2 text-blue-400">
+        <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-5 space-y-3">
+          <div className="flex items-center gap-2 text-[#2DD4BF]">
             <HardDrive className="w-4 h-4" />
-            <h4 className="text-xs font-bold uppercase tracking-wider text-white">HDFS Storage Model</h4>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#F4F4F5]">HDFS Storage Model</h3>
           </div>
-          <ul className="text-xs text-[#9aa0b8] space-y-2 leading-relaxed">
-            <li><strong className="text-white">NameNode:</strong> Master memory-resident inode tree.</li>
-            <li><strong className="text-white">DataNodes:</strong> Block storage daemons on commodity disk.</li>
-            <li><strong className="text-white">Block Size:</strong> Default 128MB to optimize disk seek latency.</li>
-            <li><strong className="text-white">Replication:</strong> 3x redundancy across failure domains.</li>
+          <ul className="text-xs text-[#A1A1AA] space-y-2 leading-relaxed">
+            <li><strong className="text-[#F4F4F5]">NameNode:</strong> Master memory-resident inode tree.</li>
+            <li><strong className="text-[#F4F4F5]">DataNodes:</strong> Block storage daemons on commodity disk.</li>
+            <li><strong className="text-[#F4F4F5]">Block Size:</strong> Default 128MB to optimize disk seek latency.</li>
+            <li><strong className="text-[#F4F4F5]">Replication:</strong> 3x redundancy across failure domains.</li>
           </ul>
         </div>
 
-        <div className="rounded-xl bg-[#161622] border border-[#252538] p-5 space-y-3">
-          <div className="flex items-center gap-2 text-cyan-400">
+        <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-5 space-y-3">
+          <div className="flex items-center gap-2 text-[#F4B860]">
             <Cpu className="w-4 h-4" />
-            <h4 className="text-xs font-bold uppercase tracking-wider text-white">YARN Execution Architecture</h4>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#F4F4F5]">YARN Execution Architecture</h3>
           </div>
-          <ul className="text-xs text-[#9aa0b8] space-y-2 leading-relaxed">
-            <li><strong className="text-white">ResourceManager:</strong> Arbitrates global compute resources.</li>
-            <li><strong className="text-white">NodeManager:</strong> Manages localized container lifecycles.</li>
-            <li><strong className="text-white">ApplicationMaster:</strong> Negotiates containers per job.</li>
-            <li><strong className="text-white">Data Locality:</strong> Executes mappers on data block hosts.</li>
+          <ul className="text-xs text-[#A1A1AA] space-y-2 leading-relaxed">
+            <li><strong className="text-[#F4F4F5]">ResourceManager:</strong> Arbitrates global compute resources.</li>
+            <li><strong className="text-[#F4F4F5]">NodeManager:</strong> Manages localized container lifecycles.</li>
+            <li><strong className="text-[#F4F4F5]">ApplicationMaster:</strong> Negotiates containers per job.</li>
+            <li><strong className="text-[#F4F4F5]">Data Locality:</strong> Executes mappers on data block hosts.</li>
           </ul>
         </div>
       </div>
 
-      {/* College Viva Examination Q&A Section */}
-      <div className="rounded-xl bg-[#161622] border border-[#252538] p-6 shadow-xl space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-amber-400">
+      {/* College Viva Examination Q&A Accordion */}
+      <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-6 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-[#F4B860]">
             <BookOpen className="w-5 h-5" />
-            <h3 className="text-sm font-bold text-white">
+            <h2 className="text-sm font-bold text-[#F4F4F5]">
               20 Most Likely Viva Questions & Answers (for Achyuth PV)
-            </h3>
+            </h2>
           </div>
-          <span className="text-xs font-mono text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+          <span className="text-xs font-mono text-[#F4B860] bg-[#F4B860]/10 px-2 py-0.5 rounded border border-[#F4B860]/20 self-start sm:self-auto">
             Exam Ready
           </span>
         </div>
 
-        <p className="text-xs text-[#9aa0b8]">
-          Click any question to view the technical answer formulated for your college project grading.
+        <p className="text-xs text-[#A1A1AA]">
+          Click any question to view the technical answer formulated for your university project viva voce.
         </p>
 
         <div className="space-y-2 pt-2">
@@ -363,21 +365,21 @@ export default function ArchitecturePage() {
             return (
               <div
                 key={idx}
-                className="rounded-lg bg-[#0d0d14] border border-[#252538] overflow-hidden transition-all"
+                className="rounded-lg bg-[#14161B] border border-[#282A30] overflow-hidden transition-standard"
               >
                 <button
                   onClick={() => setExpandedQ(isExpanded ? null : idx)}
-                  className="w-full p-3.5 text-left flex items-center justify-between text-xs font-semibold text-white hover:text-violet-300 transition-colors"
+                  className="w-full p-3.5 text-left flex items-center justify-between text-xs font-semibold text-[#F4F4F5] hover:text-[#F4B860] transition-colors"
                 >
                   <span className="pr-4">{item.q}</span>
                   {isExpanded ? (
-                    <ChevronUp className="w-4 h-4 text-violet-400 shrink-0" />
+                    <ChevronUp className="w-4 h-4 text-[#F4B860] shrink-0" />
                   ) : (
-                    <ChevronDown className="w-4 h-4 text-[#646a84] shrink-0" />
+                    <ChevronDown className="w-4 h-4 text-[#A1A1AA] shrink-0" />
                   )}
                 </button>
                 {isExpanded && (
-                  <div className="px-3.5 pb-3.5 text-xs text-[#9aa0b8] leading-relaxed border-t border-[#252538]/60 pt-2.5 bg-[#12121c]/40 animate-fade-in">
+                  <div className="px-3.5 pb-3.5 text-xs text-[#A1A1AA] leading-relaxed border-t border-[#282A30] pt-2.5 bg-[#101114] animate-fade-in">
                     <p>{item.a}</p>
                   </div>
                 )}

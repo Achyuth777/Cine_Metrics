@@ -150,7 +150,7 @@ cd hadoop
 mvn test
 ```
 
-### Run Backend PyTest Suite (12 tests):
+### Run Backend PyTest Suite (14 tests):
 ```powershell
 python -m pytest tests/test_backend_api.py -v
 ```
@@ -159,11 +159,11 @@ python -m pytest tests/test_backend_api.py -v
 
 ## 8. Dashboard Pages Overview
 
-- **Page 1 — Overview:** Global metrics (9,742 movies, 100,836 ratings, 610 users), rating distribution histogram, top 10 movies.
-- **Page 2 — Movie Explorer:** Searchable, filterable catalogue with title search, genre filters, star rating sliders, and detail drawer.
-- **Page 3 — Genre Analytics:** Map-side join results comparing rating volume vs critical acclaim across 20 genres.
-- **Page 4 — Rating Intelligence:** Temporal trends, decade quality charts, and Bayesian hidden gems discovery.
-- **Page 5 — Hadoop Job Monitor:** Live HDFS/YARN connection indicators, job execution times, partition paths, and cluster statuses.
+- **Page 1 — Overview:** 4 Primary KPIs (9,742 movies, 100,836 ratings, 610 users, 3.50 ★ global mean), global rating distribution histogram with percentages, exact Top 10 most rated movies, compact Hidden Gems preview, and dynamic insight cards.
+- **Page 2 — Movie Explorer:** Searchable, filterable catalogue across all 9,742 titles with title search, multi-genre selection (AND / OR mode), release year bounds, table and grid view switch, side-by-side comparison (2 to 4 movies) with per-movie half-star distributions, and movie detail drawer with Viva Bayesian formula breakdown.
+- **Page 3 — Genre Analytics:** Map-side join results comparing rating volume vs critical acclaim across 20 genres, multi-genre taxonomy educational callout, and one-click deep link to Explorer.
+- **Page 4 — Rating Intelligence:** Temporal trends, decade quality charts, interactive Bayesian hidden gems engine with threshold controls, and arithmetic average pitfall explanation.
+- **Page 5 — Hadoop Job Monitor:** Live HDFS/YARN connection indicators, engine provenance tracking, job execution metrics, and interactive Raw Partition Output Inspector to verify real TSV outputs.
 - **Page 6 — Architecture & Viva Guide:** 8-stage pipeline deep dive, worked numerical example (5 ratings), Big Data 5 Vs, and 20 college viva Q&As.
 
 ---

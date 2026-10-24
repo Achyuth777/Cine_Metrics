@@ -3,8 +3,9 @@ Ratings Router
 ===============
 Provides endpoints for rating distribution and trend analysis.
 
-- GET /api/ratings/distribution  — Global rating histogram data
-- GET /api/ratings/trends        — Monthly rating activity over time
+- GET /api/ratings/distribution  — Global rating histogram data (0.5 to 5.0 stars)
+- GET /api/ratings/trends        — Monthly rating activity over time (Unix timestamp aggregation)
+- GET /api/ratings/years         — Rating volume and average rating by movie release year
 """
 
 import logging
@@ -23,22 +24,8 @@ router = APIRouter(prefix="/api", tags=["Ratings"])
 @router.get("/ratings/distribution", response_model=List[RatingDistribution])
 async def get_rating_distribution():
     """
-    Return the global rating distribution histogram.
-
-    Shows how many ratings were given at each rating level
-    (0.5, 1.0, 1.5, 2.0, ..., 5.0). This data comes from the
-    RatingDistribution MapReduce job.
-
-    Example response:
-        [
-            {"rating": "0.5", "count": 1370},
-            {"rating": "1.0", "count": 2811},
-            ...
-            {"rating": "5.0", "count": 13211}
-        ]
-
-    Returns:
-        List of RatingDistribution objects sorted by rating value.
+    Return the global rating distribution histogram with exact counts and percentages.
+    Produced by the RatingDistribution MapReduce job (Job 3).
     """
     if not data_loader.rating_distribution:
         logger.warning("Rating distribution data not available")
@@ -48,6 +35,7 @@ async def get_rating_distribution():
         RatingDistribution(
             rating=rd["rating"],
             count=rd["count"],
+            percentage=rd.get("percentage")
         )
         for rd in data_loader.rating_distribution
     ]
@@ -57,20 +45,8 @@ async def get_rating_distribution():
 async def get_rating_trends():
     """
     Return monthly rating activity trends.
-
-    Shows the number of ratings submitted each month and the average
-    rating for that month. Useful for visualizing how user engagement
-    and rating patterns change over time.
-
-    Example response:
-        [
-            {"yearMonth": "2015-03", "count": 1234, "avgRating": 3.56},
-            {"yearMonth": "2015-04", "count": 987,  "avgRating": 3.72},
-            ...
-        ]
-
-    Returns:
-        List of RatingTrend objects sorted chronologically.
+    Aggregates rating activity by year-month (from ratings.csv timestamp).
+    Produced by the RatingTrends MapReduce job (Job 7).
     """
     if not data_loader.rating_trends:
         logger.warning("Rating trends data not available")
@@ -90,9 +66,7 @@ async def get_rating_trends():
 async def get_year_ratings():
     """
     Return ratings aggregated by movie release year.
-    
-    Shows the total ratings and average score for movies released in each year.
-    Produced by the YearRating MapReduce job.
+    Produced by the YearRating MapReduce job (Job 5).
     """
     if not data_loader.year_ratings:
         logger.warning("Year ratings data not available")
@@ -100,10 +74,10 @@ async def get_year_ratings():
 
     return [
         YearRating(
-            year=yr.get("year", "Unknown"),
-            ratingCount=yr.get("ratingCount", 0),
-            avgRating=yr.get("avgRating", 0.0),
-            movieCount=yr.get("movieCount", 0)
+            year=yr["year"],
+            ratingCount=yr["ratingCount"],
+            avgRating=yr["avgRating"],
+            movieCount=yr.get("movieCount", 0),
         )
         for yr in data_loader.year_ratings
     ]

@@ -17,12 +17,12 @@ export default function ChartCard({
 }: ChartCardProps) {
   return (
     <div
-      className={`rounded-xl bg-[#161622] border border-[#252538] p-5 shadow-xl transition-all duration-300 hover:border-[#3b3b58] animate-fade-in ${className}`}
+      className={`rounded-xl bg-[#191B20] border border-[#282A30] p-5 shadow-sm transition-all duration-200 hover:border-[#3A3D46] ${className}`}
     >
-      <div className="flex items-start justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-[#282A30]">
         <div>
-          <h3 className="text-sm font-semibold text-white tracking-tight">{title}</h3>
-          {subtitle && <p className="text-xs text-[#9aa0b8] mt-0.5">{subtitle}</p>}
+          <h3 className="text-sm font-semibold text-[#F4F4F5] tracking-tight">{title}</h3>
+          {subtitle && <p className="text-xs text-[#A1A1AA] mt-0.5">{subtitle}</p>}
         </div>
         {action && <div>{action}</div>}
       </div>
