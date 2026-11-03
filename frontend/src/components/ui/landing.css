@@ -1,0 +1,159 @@
+/* Landing page ("/") styles that utility classes can't express.
+   Motion here is transform and opacity only, and every animation sits behind
+   prefers-reduced-motion: no-preference, so the reduced page is the finished page. */
+
+/* ---- Headline accent line ---------------------------------------------------
+   Each word carries one slice of a gold → violet → teal ramp, so the ramp still
+   reads when GSAP splits the words and moves them one by one. Gradient text on a
+   parent would vanish under the moving words. */
+.cm-headline-accent .split-word {
+  background-image: linear-gradient(
+    90deg,
+    var(--cm-word-from, var(--cm-accent-amber)),
+    var(--cm-word-to, var(--cm-accent-teal))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.cm-headline-accent .split-word:nth-child(1) {
+  --cm-word-from: var(--cm-accent-amber);
+  --cm-word-to: color-mix(in oklch, var(--cm-accent-amber), var(--cm-accent-violet));
+}
+
+.cm-headline-accent .split-word:nth-child(2) {
+  --cm-word-from: color-mix(in oklch, var(--cm-accent-amber), var(--cm-accent-violet));
+  --cm-word-to: var(--cm-accent-violet);
+}
+
+.cm-headline-accent .split-word:nth-child(3) {
+  --cm-word-from: var(--cm-accent-violet);
+  --cm-word-to: color-mix(in oklch, var(--cm-accent-violet), var(--cm-accent-teal));
+}
+
+.cm-headline-accent .split-word:nth-child(4) {
+  --cm-word-from: color-mix(in oklch, var(--cm-accent-violet), var(--cm-accent-teal));
+  --cm-word-to: var(--cm-accent-teal);
+}
+
+@media (forced-colors: active) {
+  .cm-headline-accent .split-word {
+    background-image: none;
+    color: CanvasText;
+    -webkit-text-fill-color: CanvasText;
+  }
+}
+
+/* The plain headline waits out the grace period, then shows itself.
+   Under reduced motion it is there from the first frame. */
+@media (prefers-reduced-motion: no-preference) {
+  .cm-headline-hold {
+    animation: cm-headline-hold 220ms var(--cm-ease-out) var(--cm-headline-hold, 240ms) both;
+  }
+}
+
+@keyframes cm-headline-hold {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---- Hero backdrop ------------------------------------------------------------ */
+.cm-hero-glow {
+  background:
+    radial-gradient(55% 60% at 18% 0%, color-mix(in oklab, var(--cm-accent-violet-deep) 20%, transparent), transparent 70%),
+    radial-gradient(45% 50% at 88% 0%, color-mix(in oklab, var(--cm-accent-amber) 12%, transparent), transparent 70%);
+}
+
+.cm-hero-aurora {
+  -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent);
+  mask-image: linear-gradient(to bottom, black 55%, transparent);
+}
+
+/* ---- Section entrances ---------------------------------------------------------
+   Parts of a section rise in reading order, once, as the section enters. */
+@media (prefers-reduced-motion: no-preference) {
+  .cm-reveal [data-reveal] {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0);
+    transition:
+      opacity var(--cm-duration-reveal) var(--cm-ease-out),
+      transform var(--cm-duration-reveal) var(--cm-ease-out);
+    transition-delay: calc(var(--cm-reveal-index, 0) * 70ms);
+  }
+
+  .cm-reveal--settle [data-reveal] {
+    transform: translate3d(0, 12px, 0) scale(0.98);
+  }
+
+  .cm-reveal.is-revealed [data-reveal] {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- Feedback under the hand ------------------------------------------------- */
+.cm-press {
+  touch-action: manipulation;
+  transition:
+    transform var(--cm-duration-press) var(--cm-ease-out),
+    background-color var(--cm-duration-hover) ease,
+    border-color var(--cm-duration-hover) ease,
+    color var(--cm-duration-hover) ease;
+}
+
+.cm-tone {
+  transition:
+    background-color var(--cm-duration-hover) ease,
+    color var(--cm-duration-hover) ease,
+    text-decoration-color var(--cm-duration-hover) ease;
+}
+
+.cm-nudge {
+  transition: transform 200ms var(--cm-ease-out);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cm-press:active {
+    transform: scale(0.97);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .cm-nudge-trigger:hover .cm-nudge {
+    transform: translate3d(3px, 0, 0);
+  }
+
+  .cm-nudge-trigger:hover .cm-nudge--diagonal {
+    transform: translate3d(3px, -3px, 0);
+  }
+}
+
+/* ---- Quick search -------------------------------------------------------------
+   One focus ring around the whole field instead of one on the bare input. */
+.cm-search-field:has(input:focus-visible) {
+  outline: 2px solid var(--cm-accent-amber);
+  outline-offset: 2px;
+}
+
+.cm-search-field input:focus-visible {
+  outline: none;
+}
+
+.cm-search-field input::-webkit-search-cancel-button {
+  filter: invert(0.7);
+}
+
+/* ---- Phone menu ------------------------------------------------------------------ */
+.cm-menu > summary {
+  list-style: none;
+}
+
+.cm-menu > summary::-webkit-details-marker {
+  display: none;
+}
