@@ -1,0 +1,53 @@
+/* SpotlightCard — adapted from React Bits (src/ts-default/Components/SpotlightCard).
+   Copyright (c) 2026 David Haz. MIT + Commons Clause, see ./react-bits-LICENSE.md.
+   Padding and corner radius come from utility classes on the card. */
+
+.spotlight-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: var(--spotlight-card-surface);
+}
+
+/* Drawn once, moved with transform. */
+.spotlight-card__light,
+.spotlight-card__rim {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.spotlight-card__light {
+  z-index: -1;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.spotlight-card__border,
+.spotlight-card__edge {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+}
+
+.spotlight-card__border {
+  background: var(--spotlight-card-border);
+}
+
+.spotlight-card__edge {
+  overflow: hidden;
+  opacity: 0;
+  will-change: opacity;
+}

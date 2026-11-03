@@ -23,6 +23,36 @@
   --cm-status-danger: #EF4444;
   --cm-status-warning: #F59E0B;
   --cm-status-info: #3B82F6;
+
+  /* Landing page ("/") */
+  --cm-bg-landing: #0B0C10;       /* Landing page base */
+  --cm-bg-field: color-mix(in oklab, var(--cm-accent-violet-deep) 14%, var(--cm-bg-landing)); /* Violet section field */
+  --cm-accent-violet: #A78BFA;    /* Third accent, for colour variety */
+  --cm-accent-violet-deep: #7C3AED; /* Deep violet for the aurora */
+  --cm-accent-emerald: #34D399;   /* Passing tests and success notes */
+  --cm-ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* Entrances and press feedback */
+  --cm-duration-press: 140ms;
+  --cm-duration-hover: 180ms;
+  --cm-duration-reveal: 700ms;
+}
+
+/* The palette as Tailwind utilities: bg-cm-gold, text-cm-violet/80, ease-cm-out … */
+@theme inline {
+  --color-cm-base: var(--cm-bg-landing);
+  --color-cm-surface: var(--cm-bg-secondary);
+  --color-cm-raised: var(--cm-bg-card);
+  --color-cm-raised-hover: var(--cm-bg-card-hover);
+  --color-cm-field: var(--cm-bg-field);
+  --color-cm-ink: var(--cm-text-primary);
+  --color-cm-ink-soft: var(--cm-text-secondary);
+  --color-cm-muted: var(--cm-text-muted);
+  --color-cm-gold: var(--cm-accent-amber);
+  --color-cm-gold-hover: var(--cm-accent-amber-hover);
+  --color-cm-teal: var(--cm-accent-teal);
+  --color-cm-violet: var(--cm-accent-violet);
+  --color-cm-violet-deep: var(--cm-accent-violet-deep);
+  --color-cm-emerald: var(--cm-accent-emerald);
+  --ease-cm-out: var(--cm-ease-out);
 }
 
 body {
