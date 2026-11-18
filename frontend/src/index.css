@@ -1,43 +1,93 @@
 @import "tailwindcss";
+@import "./fonts.css";
 
 /* ==========================================================================
-   CineMetrics — Cinematic Graphite & Amber Design System
+   CineMetrics design tokens
+   A film journal paired with a research workspace: one dark ground, one warm
+   ink, one amber accent. Decisions and contrast ratios: docs/DESIGN_DECISIONS.md
    Developer: Achyuth PV | SRM Ramapuram | Big Data Essentials (21CSC314P)
    ========================================================================== */
 
 :root {
-  --cm-bg-primary: #101114;       /* Graphite deep background */
-  --cm-bg-secondary: #14161B;     /* Slightly elevated surface */
-  --cm-bg-card: #191B20;          /* Raised surface for cards and panels */
-  --cm-bg-card-hover: #21242B;    /* Card hover elevation */
-  --cm-border: #282A30;           /* Clean dark border */
-  --cm-border-hover: #3A3D46;     /* Interactive border hover */
-  --cm-text-primary: #F4F4F5;     /* Warm white */
-  --cm-text-secondary: #D4D4D8;   /* High contrast secondary */
-  --cm-text-muted: #A1A1AA;       /* Readable muted text (meets WCAG AA) */
-  --cm-accent-amber: #F4B860;     /* Restrained cinema amber accent */
-  --cm-accent-amber-hover: #F6C47B;
-  --cm-accent-teal: #2DD4BF;      /* Secondary teal for comparisons */
-  --cm-accent-teal-dark: #14B8A6;
-  --cm-status-success: #22C55E;
-  --cm-status-danger: #EF4444;
-  --cm-status-warning: #F59E0B;
-  --cm-status-info: #3B82F6;
+  /* Surfaces */
+  --cm-canvas: #101112;
+  --cm-surface-1: #191B1E;
+  --cm-surface-2: #22252A;
 
-  /* Landing page ("/") */
-  --cm-bg-landing: #0B0C10;       /* Landing page base */
-  --cm-bg-field: color-mix(in oklab, var(--cm-accent-violet-deep) 14%, var(--cm-bg-landing)); /* Violet section field */
-  --cm-accent-violet: #A78BFA;    /* Third accent, for colour variety */
-  --cm-accent-violet-deep: #7C3AED; /* Deep violet for the aurora */
-  --cm-accent-emerald: #34D399;   /* Passing tests and success notes */
-  --cm-ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* Entrances and press feedback */
+  /* Text */
+  --cm-text-primary: #F3EFE7;
+  --cm-text-secondary: #B1B3B8;
+
+  /* Accent: amber. Fills carry dark text. */
+  --cm-accent: #E8B568;
+  --cm-accent-strong: #F0C583;    /* Hover on amber fills */
+  --cm-on-accent: #101112;
+
+  /* Lines */
+  --cm-divider: color-mix(in srgb, var(--cm-text-primary) 10%, transparent); /* Decorative */
+  --cm-control-border: #7A7D84;   /* Input and control boundaries, 3:1 or better */
+
+  /* Status. Used only for real state: connected, failed. */
+  --cm-status-ok: #7FC8A0;
+  --cm-status-error: #F0907F;
+
+  /* Type: two families, served from this site (src/fonts.css). The system
+     fonts after them show until the files arrive, or if they never do. */
+  --cm-font-display: "Literata", "Literata Fallback", "Iowan Old Style", Palatino, Georgia, "Times New Roman", serif;
+  --cm-font-sans: "Public Sans", "Public Sans Fallback", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue",
+    "Public Sans Fallback Arial", Arial, sans-serif;
+
+  /* Shape and motion */
+  --cm-radius-control: 8px;
+  --cm-radius-panel: 12px;
+  --cm-duration: 180ms;
+
+  /* ------------------------------------------------------------------------
+     Legacy tokens. Only the retired hero-effect files in components/ui/ still
+     read these. Remove them together with those files.
+     ------------------------------------------------------------------------ */
+  --cm-bg-primary: #101114;
+  --cm-bg-secondary: #14161B;
+  --cm-bg-card: #191B20;
+  --cm-bg-card-hover: #21242B;
+  --cm-border: #282A30;
+  --cm-border-hover: #3A3D46;
+  --cm-text-muted: #A1A1AA;
+  --cm-accent-amber: #F4B860;
+  --cm-accent-amber-hover: #F6C47B;
+  --cm-accent-teal: #2DD4BF;
+  --cm-accent-teal-dark: #14B8A6;
+  --cm-bg-landing: #0B0C10;
+  --cm-bg-field: color-mix(in oklab, var(--cm-accent-violet-deep) 14%, var(--cm-bg-landing));
+  --cm-accent-violet: #A78BFA;
+  --cm-accent-violet-deep: #7C3AED;
+  --cm-accent-emerald: #34D399;
+  --cm-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --cm-duration-press: 140ms;
   --cm-duration-hover: 180ms;
   --cm-duration-reveal: 700ms;
 }
 
-/* The palette as Tailwind utilities: bg-cm-gold, text-cm-violet/80, ease-cm-out … */
+/* The tokens as Tailwind utilities: bg-canvas, text-ink-2, border-line, rounded-panel … */
 @theme inline {
+  --color-canvas: var(--cm-canvas);
+  --color-surface-1: var(--cm-surface-1);
+  --color-surface-2: var(--cm-surface-2);
+  --color-ink: var(--cm-text-primary);
+  --color-ink-2: var(--cm-text-secondary);
+  --color-accent: var(--cm-accent);
+  --color-accent-strong: var(--cm-accent-strong);
+  --color-on-accent: var(--cm-on-accent);
+  --color-line: var(--cm-divider);
+  --color-line-strong: var(--cm-control-border);
+  --color-ok: var(--cm-status-ok);
+  --color-danger: var(--cm-status-error);
+  --font-display: var(--cm-font-display);
+  --font-sans: var(--cm-font-sans);
+  --radius-control: var(--cm-radius-control);
+  --radius-panel: var(--cm-radius-panel);
+
+  /* Legacy utilities for the retired hero-effect files. Remove with them. */
   --color-cm-base: var(--cm-bg-landing);
   --color-cm-surface: var(--cm-bg-secondary);
   --color-cm-raised: var(--cm-bg-card);
@@ -55,46 +105,395 @@
   --ease-cm-out: var(--cm-ease-out);
 }
 
+/* The ground is dark before anything else paints, so text is never left on white. */
+html {
+  background-color: var(--cm-canvas);
+  color-scheme: dark;
+  scroll-padding-top: 1.5rem;
+}
+
 body {
   margin: 0;
-  background-color: var(--cm-bg-primary);
+  background-color: var(--cm-canvas);
   color: var(--cm-text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--cm-font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.5;
-  font-size: 14px;
+  font-size: 1rem;
 }
 
-/* Enforce tabular numerals on metrics and rankings */
-.tabular-nums, .font-mono {
-  font-feature-settings: "tnum" 1;
+::selection {
+  background-color: color-mix(in srgb, var(--cm-accent) 35%, transparent);
+  color: var(--cm-text-primary);
+}
+
+/* Tabular numerals wherever numbers are compared: tables, metric lists, form
+   fields and charts. Public Sans sets digits proportionally unless asked. */
+table, dl, input, .recharts-wrapper, .tabular-nums, .font-mono {
   font-variant-numeric: tabular-nums;
 }
 
-/* Accessible focus visible outlines */
+/* File names and formulas stay in the sans until a monospace family is
+   approved (docs/DESIGN_DECISIONS.md, open decision 4). */
+code {
+  font-family: inherit;
+  font-size: 0.95em;
+  font-weight: 500;
+}
+
+/* One focus ring everywhere */
 *:focus-visible {
-  outline: 2px solid var(--cm-accent-amber);
+  outline: 2px solid var(--cm-accent);
   outline-offset: 2px;
 }
 
-/* Custom scrollbars */
+/* Scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #101114;
+  background: var(--cm-canvas);
 }
 ::-webkit-scrollbar-thumb {
-  background: #282A30;
+  background: var(--cm-surface-2);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3A3D46;
+  background: var(--cm-control-border);
 }
 
-/* Refined transitions (150ms-220ms per design system) */
+/* Checkboxes and radios: native inputs, drawn in the system's colours.
+   Unchecked is an outlined box on the canvas; checked fills with amber. */
+.cm-check {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  border: 1.5px solid var(--cm-control-border);
+  border-radius: 4px;
+  background-color: var(--cm-canvas);
+  cursor: pointer;
+  transition: background-color var(--cm-duration) ease, border-color var(--cm-duration) ease;
+}
+
+.cm-check[type="radio"] {
+  border-radius: 50%;
+}
+
+.cm-check::before {
+  content: "";
+  width: 0.625rem;
+  height: 0.625rem;
+  background-color: var(--cm-on-accent);
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  transform: scale(0);
+}
+
+.cm-check[type="radio"]::before {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  clip-path: none;
+}
+
+.cm-check:hover:not(:disabled) {
+  border-color: var(--cm-text-secondary);
+}
+
+.cm-check:checked {
+  border-color: var(--cm-accent);
+  background-color: var(--cm-accent);
+}
+
+.cm-check:checked::before {
+  transform: scale(1);
+}
+
+.cm-check:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@media (forced-colors: active) {
+  .cm-check {
+    appearance: auto;
+  }
+}
+
+/* Dialogs (components/system/Dialog.tsx). Tailwind's reset removes the browser's
+   own centring, so position is set here. The rule sits in the components layer
+   so that utility classes on the element (size, borders, max-height) still win. */
+@layer components {
+  dialog.cm-dialog {
+    position: fixed;
+    inset: 0;
+    max-width: none;
+    max-height: none;
+    background-color: var(--cm-surface-1);
+    color: var(--cm-text-primary);
+    overscroll-behavior: contain;
+  }
+}
+
+dialog.cm-dialog::backdrop {
+  background-color: rgb(0 0 0 / 0.72);
+}
+
+/* The page behind an open dialog does not scroll. */
+html:has(dialog.cm-dialog[open]) {
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   Texture and light
+   ========================================================================== */
+
+:root {
+  /* One tile of film grain: white specks of varying strength, drawn by the
+     browser from this inline SVG. No image file and no request. */
+  --cm-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1.5 0 0 0 -0.42'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23g)'/%3E%3C/svg%3E");
+}
+
+/* Film grain over the whole page, at 2.8% opacity. It sits above the content
+   and takes no pointer input. It does not move. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  background-image: var(--cm-grain);
+  background-size: 200px 200px;
+  opacity: 0.028;
+}
+
+@media print, (forced-colors: active) {
+  body::after {
+    display: none;
+  }
+}
+
+/* Light falloff. Surfaces are lit from above and sections from their top edge,
+   so nothing reads as a flat fill. Each is a background image, so it combines
+   with any bg-* colour utility. */
+@utility lit-panel {
+  background-image:
+    linear-gradient(to bottom, color-mix(in srgb, var(--cm-text-primary) 7%, transparent) 0 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--cm-text-primary) 4%, transparent), transparent 55%);
+}
+
+@utility lit-section {
+  background-image: radial-gradient(
+    70% 90% at 50% 0%,
+    color-mix(in srgb, var(--cm-text-primary) 4.5%, transparent),
+    transparent 72%
+  );
+  background-repeat: no-repeat;
+}
+
+@utility lit-hero {
+  background-image:
+    radial-gradient(58% 72% at 10% 6%, color-mix(in srgb, var(--cm-text-primary) 7%, transparent), transparent 70%),
+    radial-gradient(42% 58% at 90% 34%, color-mix(in srgb, var(--cm-accent) 5%, transparent), transparent 70%);
+  background-repeat: no-repeat;
+}
+
+/* ==========================================================================
+   Posters (components/poster/FilmPoster.tsx)
+   The stage keeps the 2:3 shape and gives depth; the poster inside it leans.
+   Sizes are in cqw, so the art scales with the poster's own width.
+   ========================================================================== */
+@layer components {
+  .cm-poster-stage {
+    position: relative;
+    aspect-ratio: 2 / 3;
+    container-type: inline-size;
+    perspective: 900px;
+  }
+
+  .cm-poster {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    isolation: isolate;
+    border-radius: var(--cm-radius-control);
+    background-color: var(--cm-surface-1);
+    /* A glow around the disc, a wash of light from the top left, then the sky
+       down to the horizon and the water below it. The amber line covers the seam. */
+    background-image:
+      radial-gradient(
+        circle at var(--poster-halo-x) var(--poster-halo-y),
+        color-mix(in srgb, var(--cm-text-primary) 24%, transparent),
+        transparent 34cqw
+      ),
+      linear-gradient(140deg, rgb(255 255 255 / 0.07), transparent 38%),
+      linear-gradient(
+        to bottom,
+        var(--poster-sky-top),
+        var(--poster-sky-glow) var(--poster-line),
+        var(--poster-water-near) var(--poster-line),
+        var(--poster-water-deep) 66%
+      );
+    box-shadow:
+      0 2px 6px -2px rgb(0 0 0 / 0.55),
+      0 18px 30px -20px rgb(0 0 0 / 0.9);
+    transform: rotateX(var(--poster-rx, 0deg)) rotateY(var(--poster-ry, 0deg));
+    transition:
+      transform 240ms cubic-bezier(0.16, 1, 0.3, 1),
+      box-shadow var(--cm-duration) ease-out;
+  }
+
+  /* A hairline of light around the edge, above the art. */
+  .cm-poster::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--cm-text-primary) 10%, transparent),
+      inset 0 1px 0 0 color-mix(in srgb, var(--cm-text-primary) 14%, transparent);
+    pointer-events: none;
+    transition: box-shadow var(--cm-duration) ease-out;
+  }
+
+  /* While the pointer is on it the poster follows closely, then settles back. */
+  .cm-poster[data-tilting] {
+    will-change: transform;
+    box-shadow:
+      0 4px 10px -2px rgb(0 0 0 / 0.6),
+      0 28px 40px -22px rgb(0 0 0 / 0.95);
+    transition:
+      transform 90ms linear,
+      box-shadow var(--cm-duration) ease-out;
+  }
+
+  /* The dark ground the title sits on. Solid from 68% of the height down. */
+  .cm-poster-ground {
+    position: absolute;
+    inset: 57% 0 0;
+    background-image: linear-gradient(to bottom, transparent, var(--poster-ground) 26%);
+  }
+
+  .cm-poster-text {
+    position: absolute;
+    inset: auto 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3cqw;
+    padding: 0 8cqw 6.5cqw;
+  }
+
+  .cm-poster-title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    font-family: var(--cm-font-display);
+    font-weight: 500;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
+    color: var(--cm-text-primary);
+  }
+  .cm-poster-title[data-scale="xl"] {
+    font-size: max(13cqw, 0.75rem);
+    line-height: 1.04;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+  .cm-poster-title[data-scale="lg"] {
+    font-size: max(10.2cqw, 0.6875rem);
+    line-height: 1.06;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+  .cm-poster-title[data-scale="md"] {
+    font-size: max(8.4cqw, 0.625rem);
+    line-height: 1.1;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+  .cm-poster-title[data-scale="sm"] {
+    font-size: max(7cqw, 0.5625rem);
+    line-height: 1.12;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+  }
+
+  /* Year and genre, set small like the credit line at the foot of a poster. */
+  .cm-poster-billing {
+    display: flex;
+    justify-content: space-between;
+    gap: 3cqw;
+    font-size: max(4.4cqw, 0.5625rem);
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--cm-text-secondary);
+  }
+
+  /* On very small posters the credit line would be too small to read. */
+  @container (max-width: 8.5rem) {
+    .cm-poster-billing {
+      display: none;
+    }
+  }
+
+  /* A real poster, when there is one, covers the generated art once it has loaded. */
+  .cm-poster-photo {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 240ms ease-out;
+  }
+  .cm-poster[data-photo] .cm-poster-photo {
+    opacity: 1;
+  }
+
+  .cm-poster-grain {
+    position: absolute;
+    inset: 0;
+    background-image: var(--cm-grain);
+    background-size: 200px 200px;
+    opacity: 0.08;
+    pointer-events: none;
+  }
+
+  /* A patch of light that follows the pointer. Hidden until the poster leans. */
+  .cm-poster-sheen {
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(
+      78cqw circle at var(--poster-light-x, 50%) var(--poster-light-y, 0%),
+      rgb(255 255 255 / 0.18),
+      rgb(255 255 255 / 0.04) 46%,
+      transparent 70%
+    );
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--cm-duration) ease-out;
+  }
+  .cm-poster[data-tilting] .cm-poster-sheen {
+    opacity: 1;
+  }
+
+  /* Hovering a card with any pointer brightens the poster's edge. */
+  .group:hover .cm-poster::after {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--cm-text-primary) 24%, transparent),
+      inset 0 1px 0 0 color-mix(in srgb, var(--cm-text-primary) 30%, transparent);
+  }
+}
+
+/* Used by pages not yet moved to the new system (Stage 3). */
 .transition-standard {
   transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
