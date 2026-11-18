@@ -41,31 +41,6 @@
   --cm-radius-control: 8px;
   --cm-radius-panel: 12px;
   --cm-duration: 180ms;
-
-  /* ------------------------------------------------------------------------
-     Legacy tokens. Only the retired hero-effect files in components/ui/ still
-     read these. Remove them together with those files.
-     ------------------------------------------------------------------------ */
-  --cm-bg-primary: #101114;
-  --cm-bg-secondary: #14161B;
-  --cm-bg-card: #191B20;
-  --cm-bg-card-hover: #21242B;
-  --cm-border: #282A30;
-  --cm-border-hover: #3A3D46;
-  --cm-text-muted: #A1A1AA;
-  --cm-accent-amber: #F4B860;
-  --cm-accent-amber-hover: #F6C47B;
-  --cm-accent-teal: #2DD4BF;
-  --cm-accent-teal-dark: #14B8A6;
-  --cm-bg-landing: #0B0C10;
-  --cm-bg-field: color-mix(in oklab, var(--cm-accent-violet-deep) 14%, var(--cm-bg-landing));
-  --cm-accent-violet: #A78BFA;
-  --cm-accent-violet-deep: #7C3AED;
-  --cm-accent-emerald: #34D399;
-  --cm-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --cm-duration-press: 140ms;
-  --cm-duration-hover: 180ms;
-  --cm-duration-reveal: 700ms;
 }
 
 /* The tokens as Tailwind utilities: bg-canvas, text-ink-2, border-line, rounded-panel … */
@@ -87,22 +62,6 @@
   --radius-control: var(--cm-radius-control);
   --radius-panel: var(--cm-radius-panel);
 
-  /* Legacy utilities for the retired hero-effect files. Remove with them. */
-  --color-cm-base: var(--cm-bg-landing);
-  --color-cm-surface: var(--cm-bg-secondary);
-  --color-cm-raised: var(--cm-bg-card);
-  --color-cm-raised-hover: var(--cm-bg-card-hover);
-  --color-cm-field: var(--cm-bg-field);
-  --color-cm-ink: var(--cm-text-primary);
-  --color-cm-ink-soft: var(--cm-text-secondary);
-  --color-cm-muted: var(--cm-text-muted);
-  --color-cm-gold: var(--cm-accent-amber);
-  --color-cm-gold-hover: var(--cm-accent-amber-hover);
-  --color-cm-teal: var(--cm-accent-teal);
-  --color-cm-violet: var(--cm-accent-violet);
-  --color-cm-violet-deep: var(--cm-accent-violet-deep);
-  --color-cm-emerald: var(--cm-accent-emerald);
-  --ease-cm-out: var(--cm-ease-out);
 }
 
 /* The ground is dark before anything else paints, so text is never left on white. */
