@@ -311,7 +311,7 @@ Checks run: poster interactions 17/17 (tilt, settle, click-through, tab stops, r
 
 **Checks, 18 Nov 2026:** build passes, lint clean on the changed files; screenshots at 375, 768 and 1440 for both pages and the failed state at 1440; no sideways page scroll at any width.
 
-**Known:** on phones the top-10 and genre tables scroll sideways inside their own box, so the adjusted-score and average columns start off screen.
+**Known (fixed 20 Nov):** on phones the top-10 and genre tables scroll sideways inside their own box; a one-line swipe hint (`ScrollHint`) now says so below 768px.
 
 ## Stage 3, part 2: `/ratings`, `/hadoop`, `/architecture`
 
@@ -365,6 +365,13 @@ Run on 18 Nov 2026 against the production build (`vite preview`) and the local A
 - **"Last processed" no longer reports the API start time.** `backend/routers/overview.py` fell back to the time the API loaded the files when no processing time was recorded. It now returns `"unknown"`, the fallback the code already used further down. The field stays a string; the frontend does not display it.
 - API tests: 13 pass, 1 fails, unchanged (the clean-clone `jobs.json` test, not touched).
 
+## Follow-ups, 20 Nov 2026
+
+- Deleted the remaining unused files (see open decision 2).
+- Phone fixes: SVG chart labels kept inside the chart; swipe hints under sideways-scrolling tables on `/overview`, `/genres`, `/ratings`. Checked at 375: 14 of 14 labels inside both charts; hints show at 375 and not at 1440.
+- `test_hadoop_status_and_jobs` rewritten (test-only); both its branches were exercised (no record, and two recorded jobs).
+- JetBrains Mono added for code (see open decision 4); checked that it loads and is applied to `<code>` and the output dialog.
+
 ## Contracts and calculations
 
 No API contract, response shape, route or calculation has been changed. The two backend fixes above change timing and one value (`lastProcessed` is `"unknown"` when not recorded), not the shape.
@@ -372,14 +379,14 @@ No API contract, response shape, route or calculation has been changed. The two 
 ## Open decisions
 
 1. **Stage 3 is built.** Stage 4 (full verification across all routes) remains.
-2. **Retired files and packages.** Deleted on 20 Nov (approved): `components/ui/`, `gsap`, `@gsap/react`, `motion`, `tailwind-merge`, and the legacy CSS tokens. Still unused but not deleted (not in that approval): `components/StatCard.tsx`, `components/ChartCard.tsx`, `hooks/useApi.ts`, `App.css`, `src/assets/*`, `public/icons.svg`.
+2. **Retired files and packages.** All deleted on 20 Nov (approved): `components/ui/`, `gsap`, `@gsap/react`, `motion`, `tailwind-merge`, the legacy CSS tokens, `StatCard.tsx`, `ChartCard.tsx`, `useApi.ts`, `App.css`, `src/assets/*` and `public/icons.svg`.
 3. **Fonts.** Decided: Literata and Public Sans (layer 4).
-4. **Monospace.** Raw partition output on `/hadoop` reads best in a monospace face, which would be a third family.
+4. **Monospace.** Decided 20 Nov: JetBrains Mono 5.3.0 (`@fontsource-variable/jetbrains-mono`, OFL 1.1), self-hosted, as a third family for `<code>`, file names, the formula and raw output lines only (40 kB, plus 15 kB for extended Latin when needed). This amends the "at most two families" rule: two for text, one for code.
 5. **`@types/three` and `postprocessing`** are installed only indirectly. Add `@types/three` as an explicit dev dependency?
-6. **Backend fixes.** The blocking probes and the "last processed" time are fixed (20 Nov). Still open: one API test fails on a clean clone because `jobs.json` is git-ignored.
+6. **Backend fixes.** Done 20 Nov: the blocking probes, the "last processed" time, and the job-history test, which now checks the recorded runs (exactly those, or none with a note) instead of a fixed count of 7. API tests: 14 of 14 pass.
 7. **Constellation sample.** The top 500 by adjusted score form a narrow band. A sample that includes low-scoring films would fill the box but would no longer be "the top films".
 
 ## Known issues
 
-- On phones the "Ratings" axis title clips at the right edge of the chart.
+- Fixed 20 Nov: chart labels in the phone (SVG) charts are kept inside the chart (`keepInside` in `lib/constellation.ts`).
 - Four lint warnings in the new 3D files (cursor styling on the canvas element, and a helper exported beside a component).

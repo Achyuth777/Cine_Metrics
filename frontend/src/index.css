@@ -31,11 +31,12 @@
   --cm-status-ok: #7FC8A0;
   --cm-status-error: #F0907F;
 
-  /* Type: two families, served from this site (src/fonts.css). The system
+  /* Type: two text families and one for code, served from this site (src/fonts.css). The system
      fonts after them show until the files arrive, or if they never do. */
   --cm-font-display: "Literata", "Literata Fallback", "Iowan Old Style", Palatino, Georgia, "Times New Roman", serif;
   --cm-font-sans: "Public Sans", "Public Sans Fallback", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue",
     "Public Sans Fallback Arial", Arial, sans-serif;
+  --cm-font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
 
   /* Shape and motion */
   --cm-radius-control: 8px;
@@ -59,6 +60,7 @@
   --color-danger: var(--cm-status-error);
   --font-display: var(--cm-font-display);
   --font-sans: var(--cm-font-sans);
+  --font-mono: var(--cm-font-mono);
   --radius-control: var(--cm-radius-control);
   --radius-panel: var(--cm-radius-panel);
 
@@ -93,12 +95,11 @@ table, dl, input, .recharts-wrapper, .tabular-nums, .font-mono {
   font-variant-numeric: tabular-nums;
 }
 
-/* File names and formulas stay in the sans until a monospace family is
-   approved (docs/DESIGN_DECISIONS.md, open decision 4). */
+/* Code, file names and formulas: the third family, JetBrains Mono. Set a
+   touch smaller than the surrounding text, whose x-height it exceeds. */
 code {
-  font-family: inherit;
-  font-size: 0.95em;
-  font-weight: 500;
+  font-family: var(--cm-font-mono);
+  font-size: 0.88em;
 }
 
 /* One focus ring everywhere */

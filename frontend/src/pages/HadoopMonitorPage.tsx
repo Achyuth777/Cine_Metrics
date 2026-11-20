@@ -148,7 +148,7 @@ function OutputPreview({ job, onClose }: { job: (typeof OUTPUTS)[number]; onClos
       <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4 sm:px-6">
         <div>
           <h2 id={titleId} className="text-lg font-semibold text-ink">{job.name}</h2>
-          <p className="mt-0.5 text-[13px] text-ink-2">data/processed/{job.job}/, first 25 lines</p>
+          <p className="mt-0.5 text-[13px] text-ink-2"><code>data/processed/{job.job}/</code>, first 25 lines</p>
         </div>
         <button type="button" onClick={onClose} className={buttonClass({ variant: 'quiet', size: 'icon' })} aria-label="Close">
           <X className="size-5" aria-hidden="true" />
@@ -174,7 +174,7 @@ function OutputPreview({ job, onClose }: { job: (typeof OUTPUTS)[number]; onClos
                   <tr className="border-b border-line">
                     <th scope="col" className="py-2 pl-4 pr-3 font-medium">Line</th>
                     {job.columns.map((column) => (
-                      <th key={column} scope="col" className="px-3 py-2 font-medium">{column}</th>
+                      <th key={column} scope="col" className="px-3 py-2 font-mono text-[12px] font-medium">{column}</th>
                     ))}
                   </tr>
                 </thead>
@@ -183,7 +183,7 @@ function OutputPreview({ job, onClose }: { job: (typeof OUTPUTS)[number]; onClos
                     <tr key={index}>
                       <td className="py-1.5 pl-4 pr-3 text-ink-2">{index + 1}</td>
                       {line.split('\t').map((cell, cellIndex) => (
-                        <td key={cellIndex} className="whitespace-nowrap px-3 py-1.5 text-ink">{cell}</td>
+                        <td key={cellIndex} className="whitespace-nowrap px-3 py-1.5 font-mono text-[13px] text-ink">{cell}</td>
                       ))}
                     </tr>
                   ))}
@@ -213,7 +213,7 @@ function StoredOutputs() {
             <div className="min-w-0">
               <p className="font-semibold text-ink">{output.name}</p>
               <p className="text-[13px] text-ink-2">
-                {output.job}/ · {output.columns.join(', ')} · written by {output.source}
+                <code>{output.job}/</code> · {output.columns.join(', ')} · written by <code>{output.source}</code>
               </p>
             </div>
             <button type="button" onClick={() => setOpen(output)} className={buttonClass({ variant: 'secondary', size: 'sm' })}>

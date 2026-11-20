@@ -58,7 +58,7 @@ function Formula() {
   const mean = overview.status === 'ready' ? formatScore(overview.data.globalAverageRating, 4) : '…';
   return (
     <div className="space-y-3 text-[15px] leading-relaxed text-ink-2">
-      <p className="rounded-control bg-canvas px-4 py-3 text-ink">adjusted score = (v ÷ (v + m)) × R + (m ÷ (v + m)) × C</p>
+      <p className="rounded-control bg-canvas px-4 py-3 font-mono text-sm text-ink">adjusted score = (v ÷ (v + m)) × R + (m ÷ (v + m)) × C</p>
       <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
         <div>
           <dt className="inline font-semibold text-ink">v</dt> <dd className="inline">the film’s number of ratings</dd>
