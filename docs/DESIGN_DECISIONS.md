@@ -335,7 +335,7 @@ Viva answers were checked against the Java code and corrected:
 
 **Type:** `<code>` now inherits the sans, so no third (monospace) family appears until open decision 4 is answered.
 
-**Checks, 18 Nov 2026:** build passes; screenshots at 375, 768, 1440 and failed state for all three pages, no sideways page scroll. Scripted: formula shows C = 3.5016; gem thresholds reject an invalid range and disable the button; output dialog shows 25 lines in 4 columns and closes; 23 expandable sections open; 21 source links. `/hadoop` takes 5–10 seconds to fill because the status probe blocks the API (backend issue, open decision 6).
+**Checks, 18 Nov 2026:** build passes; screenshots at 375, 768, 1440 and failed state for all three pages, no sideways page scroll. Scripted: formula shows C = 3.5016; gem thresholds reject an invalid range and disable the button; output dialog shows 25 lines in 4 columns and closes; 23 expandable sections open; 21 source links. `/hadoop` took 5–10 seconds to fill because the status probe blocked the API; fixed on 20 Nov (see "Backend fixes").
 
 ## Stage 4: verification
 
@@ -359,18 +359,24 @@ Run on 18 Nov 2026 against the production build (`vite preview`) and the local A
 
 **Not verified:** real TMDB posters with a real key; frame rate on other hardware or at device pixel ratio 2; screen-reader output in a real screen reader (only the accessibility tree was checked); Safari and Firefox.
 
+## Backend fixes, 20 Nov 2026 (approved)
+
+- **Cluster probes no longer block the API.** `backend/routers/hadoop.py` called the blocking `urlopen` inside `async` handlers, so every endpoint waited while a probe timed out. The probes now run on worker threads (`asyncio.to_thread`), and the HDFS and YARN probes run at the same time. Measured with no cluster present: `/api/overview` during a status probe went from 7,934 ms to 16–18 ms; `/api/hadoop/status` from 8,075 ms to about 4,100 ms.
+- **"Last processed" no longer reports the API start time.** `backend/routers/overview.py` fell back to the time the API loaded the files when no processing time was recorded. It now returns `"unknown"`, the fallback the code already used further down. The field stays a string; the frontend does not display it.
+- API tests: 13 pass, 1 fails, unchanged (the clean-clone `jobs.json` test, not touched).
+
 ## Contracts and calculations
 
-No API contract, response shape, route or calculation has been changed.
+No API contract, response shape, route or calculation has been changed. The two backend fixes above change timing and one value (`lastProcessed` is `"unknown"` when not recorded), not the shape.
 
 ## Open decisions
 
 1. **Stage 3 is built.** Stage 4 (full verification across all routes) remains.
-2. **Retired files and packages.** `components/ui/` (Aurora, SplitText, CountUp, SpotlightCard and helpers) and the packages `gsap`, `@gsap/react` and `motion` are no longer used. Delete them?
+2. **Retired files and packages.** Deleted on 20 Nov (approved): `components/ui/`, `gsap`, `@gsap/react`, `motion`, `tailwind-merge`, and the legacy CSS tokens. Still unused but not deleted (not in that approval): `components/StatCard.tsx`, `components/ChartCard.tsx`, `hooks/useApi.ts`, `App.css`, `src/assets/*`, `public/icons.svg`.
 3. **Fonts.** Decided: Literata and Public Sans (layer 4).
 4. **Monospace.** Raw partition output on `/hadoop` reads best in a monospace face, which would be a third family.
 5. **`@types/three` and `postprocessing`** are installed only indirectly. Add `@types/three` as an explicit dev dependency?
-6. **Backend fixes that need approval:** `overview.py:49` reports the API start time as "last processed"; the Hadoop probes block the API; one API test fails on a clean clone.
+6. **Backend fixes.** The blocking probes and the "last processed" time are fixed (20 Nov). Still open: one API test fails on a clean clone because `jobs.json` is git-ignored.
 7. **Constellation sample.** The top 500 by adjusted score form a narrow band. A sample that includes low-scoring films would fill the box but would no longer be "the top films".
 
 ## Known issues

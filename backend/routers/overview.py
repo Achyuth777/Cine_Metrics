@@ -46,7 +46,9 @@ async def get_overview():
     )
 
     engine = data_loader.provenance_info.get("engine", "python-reference")
-    processed_at = data_loader.provenance_info.get("processedAt") or data_loader.last_loaded or "unknown"
+    # When the processing time was not recorded, say so. Falling back to the
+    # time the API loaded the files reported the wrong event as "processed".
+    processed_at = data_loader.provenance_info.get("processedAt") or "unknown"
     api_loaded_at = data_loader.provenance_info.get("apiLoadedAt") or data_loader.last_loaded
 
     return OverviewResponse(
