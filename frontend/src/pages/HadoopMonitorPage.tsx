@@ -1,410 +1,275 @@
-import React, { useState } from 'react';
-import {
-  Server,
-  Activity,
-  CheckCircle2,
-  Clock,
-  HardDrive,
-  Cpu,
-  RefreshCw,
-  AlertTriangle,
-  FolderOpen,
-  Terminal,
-  Layers,
-  FileCode,
-  X,
-  ExternalLink,
-  ShieldCheck,
-  Eye,
-  Database
-} from 'lucide-react';
+import { useId, useState } from 'react';
+import { RefreshCw, X } from 'lucide-react';
 import { api } from '../api';
-import { useApi } from '../hooks/useApi';
-import { PartitionOutputPreview } from '../types';
-import { LoadingSpinner, ErrorState } from '../components/LoadingState';
+import { EmptyState, ErrorState, LoadingSpinner } from '../components/LoadingState';
+import Dialog from '../components/system/Dialog';
+import PageHeader from '../components/system/PageHeader';
+import { buttonClass } from '../components/system/buttonClass';
+import { useQuery } from '../hooks/useQuery';
+import { describeError, formatCount, formatDateTime } from '../lib/format';
 
-export default function HadoopMonitorPage() {
-  const { data: status, loading: statusLoading, refetch: refetchStatus } = useApi(api.getHadoopStatus);
-  const { data: jobsData, loading: jobsLoading, refetch: refetchJobs } = useApi(api.getHadoopJobs);
+const PANEL = 'lit-panel rounded-panel bg-surface-1 p-5 sm:p-6';
+const TITLE = 'text-lg font-semibold text-ink';
 
-  // Partition Preview Modal State
-  const [previewModalOpen, setPreviewModalOpen] = useState(false);
-  const [previewData, setPreviewData] = useState<PartitionOutputPreview | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+/**
+ * The seven output folders the API can read, in pipeline order. Names and
+ * schemas as listed in backend/routers/hadoop.py; job classes in
+ * hadoop/src/main/java/com/cinemetrics/mapreduce/.
+ */
+const OUTPUTS = [
+  { job: 'avgrating', name: 'Average rating per film', source: 'AverageRatingJob.java', columns: ['movieId', 'avgRating', 'ratingCount'] },
+  { job: 'mostrated', name: 'Most rated films', source: 'MostRatedJob.java', columns: ['movieId', 'ratingCount'] },
+  { job: 'ratingdist', name: 'Rating distribution', source: 'RatingDistributionJob.java', columns: ['rating', 'count'] },
+  { job: 'genrepop', name: 'Genre popularity', source: 'GenrePopularityJob.java', columns: ['genre', 'movieCount', 'ratingCount', 'avgRating'] },
+  { job: 'yearrating', name: 'Ratings by release year', source: 'YearRatingJob.java', columns: ['year', 'avgRating', 'ratingCount'] },
+  { job: 'hiddengems', name: 'Hidden gems', source: 'HiddenGemsJob.java', columns: ['movieId', 'avgRating', 'ratingCount', 'score'] },
+  { job: 'ratingtrends', name: 'Ratings by month', source: 'RatingTrendsJob.java', columns: ['yearMonth', 'count', 'avgRating'] }
+];
 
-  if (statusLoading || jobsLoading) {
-    return <LoadingSpinner text="Probing Hadoop NameNode (9870), YARN (8088) & JobHistory (19888)..." />;
-  }
-
-  const isConnected = status?.connected ?? false;
-  // Handle both array and object responses defensively
-  const jobs = Array.isArray(jobsData) ? jobsData : (jobsData?.jobs || []);
-  const engine = status?.engine || jobsData?.engine || 'python-reference';
-  const processedAt = status?.processedAt || jobsData?.processedAt;
-  const telemetryTime = status?.telemetryObservedAt || jobsData?.telemetryObservedAt;
-
-  const handleRefreshAll = () => {
-    refetchStatus();
-    refetchJobs();
-  };
-
-  const handleInspectPartition = (jobDirectory: string) => {
-    setPreviewLoading(true);
-    setPreviewError(null);
-    setPreviewModalOpen(true);
-    api.getPartitionOutputPreview(jobDirectory, 25)
-      .then(res => {
-        setPreviewData(res);
-        setPreviewLoading(false);
-      })
-      .catch(err => {
-        setPreviewError(err.message || 'Failed to read reducer partition');
-        setPreviewLoading(false);
-      });
-  };
-
-  const jobDirMapping: Record<string, string> = {
-    'AverageMovieRating': 'avgrating',
-    'AverageRating': 'avgrating',
-    'MostRatedMovies': 'mostrated',
-    'MostRated': 'mostrated',
-    'RatingDistribution': 'ratingdist',
-    'GenrePopularity': 'genrepop',
-    'YearRatings': 'yearrating',
-    'YearRating': 'yearrating',
-    'HiddenGems': 'hiddengems',
-    'RatingTrends': 'ratingtrends'
-  };
-
+/** A row in an "about this" list. Missing values say so instead of disappearing. */
+function Fact({ label, value }: { label: string; value: string | null | undefined }) {
   return (
-    <div className="space-y-6 max-w-7xl mx-auto animate-fade-in pb-16">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#282A30]">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F4F4F5]">
-              Hadoop MapReduce Job Monitor
-            </h1>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#F4B860]/10 text-[#F4B860] border border-[#F4B860]/30 font-mono font-medium">
-              YARN / HDFS
-            </span>
-          </div>
-          <p className="text-sm text-[#A1A1AA] mt-1">
-            Real-time cluster telemetry and genuine MapReduce reducer partition inspection.
-          </p>
-        </div>
+    <div className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 border-b border-line py-2.5 last:border-b-0">
+      <dt className="text-ink-2">{label}</dt>
+      <dd className={value ? 'text-ink' : 'text-ink-2 italic'}>{value || 'Not recorded'}</dd>
+    </div>
+  );
+}
 
-        <button
-          onClick={handleRefreshAll}
-          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#191B20] hover:bg-[#21242B] text-[#F4F4F5] border border-[#282A30] text-xs font-semibold transition-standard self-start sm:self-auto shadow-sm"
-        >
-          <RefreshCw className="w-3.5 h-3.5 text-[#F4B860]" />
-          <span>Probe Cluster Health</span>
+function ClusterStatus() {
+  const status = useQuery('hadoop-status', () => api.getHadoopStatus());
+  const action = (
+    <button type="button" onClick={status.retry} disabled={status.status === 'loading'} className={buttonClass({ variant: 'secondary', size: 'sm' })}>
+      <RefreshCw className="size-3.5" aria-hidden="true" />
+      Check again
+    </button>
+  );
+  let body;
+  if (status.status === 'error') {
+    const failure = describeError(status.error, 'the cluster status');
+    body = <ErrorState title={failure.title} message={failure.message} onRetry={status.retry} />;
+  } else if (status.status !== 'ready') {
+    body = <LoadingSpinner text="Checking for a cluster. This can take a few seconds when none answers…" />;
+  } else {
+    const s = status.data;
+    body = (
+      <>
+        <p className="flex items-center gap-2.5 text-base font-semibold text-ink">
+          <span className={`size-2.5 shrink-0 rounded-full ${s.connected ? 'bg-ok' : 'bg-ink-2'}`} aria-hidden="true" />
+          {s.connected ? 'A Hadoop cluster answered' : 'No Hadoop cluster is connected'}
+        </p>
+        <p className="mt-1.5 max-w-[68ch] text-[15px] leading-relaxed text-ink-2">
+          {s.connected
+            ? 'The API reached the cluster’s web interfaces when it checked. Figures in this app still come from the stored output files below.'
+            : 'The API tried the HDFS NameNode (port 9870) and YARN ResourceManager (port 8088) and got no answer. That does not affect the rest of the app: every page reads the stored output files below.'}
+        </p>
+        <dl className="mt-4 text-sm">
+          <Fact label="Checked at" value={s.telemetryObservedAt ? formatDateTime(s.telemetryObservedAt) : null} />
+          {s.connected && <Fact label="Active nodes" value={s.activeNodes != null ? String(s.activeNodes) : null} />}
+          {s.connected && <Fact label="Hadoop version" value={s.clusterVersion} />}
+        </dl>
+      </>
+    );
+  }
+  return (
+    <section aria-labelledby="cluster-title" className={PANEL}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 id="cluster-title" className={TITLE}>Live cluster</h2>
+        {action}
+      </div>
+      {body}
+    </section>
+  );
+}
+
+function JobHistory() {
+  const jobs = useQuery('hadoop-jobs', () => api.getHadoopJobs());
+  let body;
+  if (jobs.status === 'error') {
+    const failure = describeError(jobs.error, 'the job history');
+    body = <ErrorState title={failure.title} message={failure.message} onRetry={jobs.retry} />;
+  } else if (jobs.status !== 'ready') {
+    body = <LoadingSpinner text="Loading the job history…" />;
+  } else if (jobs.data.jobs.length === 0) {
+    body = (
+      <EmptyState
+        title="No job runs are recorded"
+        message={`This copy has no record of when the jobs ran (data/processed/jobs.json is missing). The output files below were produced by the engine the API reports: ${jobs.data.engine}.`}
+      />
+    );
+  } else {
+    body = (
+      <div className="relative overflow-x-auto" role="region" aria-label="Recorded job runs, scrollable table" tabIndex={0}>
+        <table className="w-full min-w-[40rem] text-left text-sm">
+          <caption className="sr-only">Recorded job runs, as stored in data/processed/jobs.json.</caption>
+          <thead className="text-[13px] text-ink-2">
+            <tr className="border-b border-line">
+              <th scope="col" className="py-2 pr-3 font-medium">Job</th>
+              <th scope="col" className="px-2 py-2 font-medium">Result</th>
+              <th scope="col" className="px-2 py-2 font-medium">Started</th>
+              <th scope="col" className="px-2 py-2 font-medium">Took</th>
+              <th scope="col" className="px-2 py-2 text-right font-medium">Records in</th>
+              <th scope="col" className="py-2 pl-2 text-right font-medium">Records out</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {jobs.data.jobs.map((job) => (
+              <tr key={job.jobId}>
+                <th scope="row" className="py-2.5 pr-3 font-medium text-ink">
+                  {job.jobName}
+                  <span className="block text-[13px] font-normal text-ink-2">{job.jobId}</span>
+                </th>
+                <td className="px-2 py-2.5 text-ink">{job.status}</td>
+                <td className="px-2 py-2.5 text-ink-2">{job.startTime ? formatDateTime(job.startTime) : 'Not recorded'}</td>
+                <td className="px-2 py-2.5 text-ink-2">{job.duration ?? 'Not recorded'}</td>
+                <td className="px-2 py-2.5 text-right text-ink">{job.inputRecords != null ? formatCount(job.inputRecords) : '—'}</td>
+                <td className="py-2.5 pl-2 text-right text-ink">{job.outputRecords != null ? formatCount(job.outputRecords) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  return (
+    <section aria-labelledby="history-title" className={PANEL}>
+      <h2 id="history-title" className={TITLE}>Job history</h2>
+      <p className="mb-4 mt-1 max-w-[68ch] text-[15px] leading-relaxed text-ink-2">Past runs, as recorded when the jobs were run. Nothing here is live.</p>
+      {body}
+    </section>
+  );
+}
+
+function OutputPreview({ job, onClose }: { job: (typeof OUTPUTS)[number]; onClose: () => void }) {
+  const titleId = useId();
+  const preview = useQuery(`preview:${job.job}`, () => api.getPartitionOutputPreview(job.job, 25));
+  return (
+    <Dialog open onClose={onClose} labelledBy={titleId}>
+      <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4 sm:px-6">
+        <div>
+          <h2 id={titleId} className="text-lg font-semibold text-ink">{job.name}</h2>
+          <p className="mt-0.5 text-[13px] text-ink-2"><code>data/processed/{job.job}/</code>, first 25 lines</p>
+        </div>
+        <button type="button" onClick={onClose} className={buttonClass({ variant: 'quiet', size: 'icon' })} aria-label="Close">
+          <X className="size-5" aria-hidden="true" />
         </button>
       </div>
-
-      {/* Cluster Connection & Provenance Banner */}
-      <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-5 shadow-sm space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div
-              className={`p-3 rounded-lg border shrink-0 ${
-                isConnected
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                  : 'bg-[#F4B860]/10 border-[#F4B860]/30 text-[#F4B860]'
-              }`}
-            >
-              {isConnected ? <CheckCircle2 className="w-6 h-6" /> : <ShieldCheck className="w-6 h-6" />}
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+        {preview.status === 'error' && (() => {
+          const failure = describeError(preview.error, 'this output file');
+          return <ErrorState title={failure.title} message={failure.message} onRetry={preview.retry} />;
+        })()}
+        {preview.status === 'loading' && <LoadingSpinner text="Reading the file…" />}
+        {preview.status === 'ready' && (
+          <>
+            <dl className="mb-4 grid grid-cols-2 gap-x-6 text-sm sm:grid-cols-3">
+              <Fact label="File" value={preview.data.fileName} />
+              <Fact label="Size" value={`${formatCount(Math.round(preview.data.fileSizeBytes / 1024))} KB`} />
+              <Fact label="Part files" value={String(preview.data.totalPartitions)} />
+            </dl>
+            <div className="relative overflow-x-auto rounded-control bg-canvas" role="region" aria-label="File lines, scrollable table" tabIndex={0}>
+              <table className="w-full text-left text-sm">
+                <caption className="sr-only">The first {preview.data.sampleLinesCount} lines, split at each tab into columns.</caption>
+                <thead className="text-[13px] text-ink-2">
+                  <tr className="border-b border-line">
+                    <th scope="col" className="py-2 pl-4 pr-3 font-medium">Line</th>
+                    {job.columns.map((column) => (
+                      <th key={column} scope="col" className="px-3 py-2 font-mono text-[12px] font-medium">{column}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {preview.data.sampleLines.map((line, index) => (
+                    <tr key={index}>
+                      <td className="py-1.5 pl-4 pr-3 text-ink-2">{index + 1}</td>
+                      {line.split('\t').map((cell, cellIndex) => (
+                        <td key={cellIndex} className="whitespace-nowrap px-3 py-1.5 font-mono text-[13px] text-ink">{cell}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h2 className="text-sm font-bold text-[#F4F4F5]">
-                  {isConnected
-                    ? 'Connected to Live Hadoop Cluster'
-                    : 'MapReduce Processed Snapshot Active (Cluster Offline)'}
-                </h2>
-                <span
-                  className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
-                    isConnected
-                      ? 'bg-emerald-500/20 text-emerald-300'
-                      : 'bg-[#282A30] text-[#F4B860] border border-[#3A3D46]'
-                  }`}
-                >
-                  Engine: {engine}
-                </span>
-              </div>
-              <p className="text-xs text-[#A1A1AA] mt-1.5 leading-relaxed max-w-2xl">
-                {status?.message ||
-                  'Calculations originate from genuine Hadoop MapReduce batch processing algorithms. When the cluster is offline, data is served from verified partition outputs.'}
+            <p className="mt-3 text-[13px] text-ink-2">Each line in the file is one reducer output record, with tabs between fields.</p>
+          </>
+        )}
+      </div>
+    </Dialog>
+  );
+}
+
+function StoredOutputs() {
+  const [open, setOpen] = useState<(typeof OUTPUTS)[number] | null>(null);
+  return (
+    <section aria-labelledby="outputs-title" className={PANEL}>
+      <h2 id="outputs-title" className={TITLE}>Stored outputs</h2>
+      <p className="mb-4 mt-1 max-w-[68ch] text-[15px] leading-relaxed text-ink-2">
+        The result files every page of this app reads, one folder per job, under <code className="text-ink">data/processed/</code>. Open
+        one to see its first lines exactly as written.
+      </p>
+      <ul className="divide-y divide-line">
+        {OUTPUTS.map((output) => (
+          <li key={output.job} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-3">
+            <div className="min-w-0">
+              <p className="font-semibold text-ink">{output.name}</p>
+              <p className="text-[13px] text-ink-2">
+                <code>{output.job}/</code> · {output.columns.join(', ')} · written by <code>{output.source}</code>
               </p>
             </div>
-          </div>
+            <button type="button" onClick={() => setOpen(output)} className={buttonClass({ variant: 'secondary', size: 'sm' })}>
+              Show first lines<span className="sr-only"> of {output.name}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {open && <OutputPreview job={open} onClose={() => setOpen(null)} />}
+    </section>
+  );
+}
 
-          {/* 3 Node Health Indicators */}
-          <div className="grid grid-cols-3 gap-2 text-xs font-mono shrink-0">
-            <div className="px-3 py-2 rounded-lg bg-[#14161B] border border-[#282A30] text-center">
-              <span className="text-[10px] text-[#A1A1AA] block uppercase">HDFS NameNode</span>
-              <span className={isConnected ? 'text-emerald-400 font-bold' : 'text-[#A1A1AA]'}>
-                :9870 {isConnected ? 'UP' : 'STANDBY'}
-              </span>
-            </div>
-            <div className="px-3 py-2 rounded-lg bg-[#14161B] border border-[#282A30] text-center">
-              <span className="text-[10px] text-[#A1A1AA] block uppercase">YARN ResMgr</span>
-              <span className={isConnected ? 'text-emerald-400 font-bold' : 'text-[#A1A1AA]'}>
-                :8088 {isConnected ? 'UP' : 'STANDBY'}
-              </span>
-            </div>
-            <div className="px-3 py-2 rounded-lg bg-[#14161B] border border-[#282A30] text-center">
-              <span className="text-[10px] text-[#A1A1AA] block uppercase">JobHistory</span>
-              <span className={isConnected ? 'text-emerald-400 font-bold' : 'text-[#A1A1AA]'}>
-                :19888 {isConnected ? 'UP' : 'STANDBY'}
-              </span>
-            </div>
-          </div>
-        </div>
+function Provenance() {
+  const overview = useQuery('overview', () => api.getOverview());
+  if (overview.status === 'error') {
+    const failure = describeError(overview.error, 'provenance details');
+    return <ErrorState title={failure.title} message={failure.message} onRetry={overview.retry} />;
+  }
+  if (overview.status !== 'ready') return <LoadingSpinner text="Loading provenance…" />;
+  const o = overview.data;
+  return (
+    <dl className="text-sm">
+      <Fact label="Dataset" value={`${o.datasetInfo.name}, ${formatCount(o.datasetInfo.records)} ratings`} />
+      <Fact label="Source" value={o.datasetInfo.source} />
+      <Fact label="Engine that produced the outputs, as the API reports it" value={o.engine} />
+      <Fact label="Loaded into the API" value={o.apiLoadedAt ? formatDateTime(o.apiLoadedAt) : null} />
+    </dl>
+  );
+}
 
-        {/* Timestamps Trace */}
-        <div className="pt-3 border-t border-[#282A30] flex flex-wrap items-center justify-between text-[11px] text-[#A1A1AA] gap-2">
-          <div className="flex items-center gap-4">
-            {processedAt && (
-              <span>
-                <strong>Dataset Snapshot:</strong>{' '}
-                <span className="font-mono text-[#F4F4F5]">
-                  {new Date(processedAt).toLocaleString()}
-                </span>
-              </span>
-            )}
-            {status?.apiLoadedAt && (
-              <span>
-                <strong>API Memory Cache:</strong>{' '}
-                <span className="font-mono text-[#F4F4F5]">
-                  {new Date(status.apiLoadedAt).toLocaleTimeString()}
-                </span>
-              </span>
-            )}
-          </div>
-          {telemetryTime && (
-            <span>
-              <strong>Last Probed:</strong>{' '}
-              <span className="font-mono text-[#F4B860]">
-                {new Date(telemetryTime).toLocaleTimeString()}
-              </span>
-            </span>
-          )}
-        </div>
+export default function HadoopMonitorPage() {
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        title="Hadoop"
+        description="Three separate things: whether a Hadoop cluster is reachable right now, which job runs were recorded, and the stored output files the app reads."
+      />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ClusterStatus />
+        <section aria-labelledby="provenance-title" className={PANEL}>
+          <h2 id="provenance-title" className={`${TITLE} mb-3`}>Where the numbers come from</h2>
+          <Provenance />
+        </section>
       </div>
-
-      {/* 7 MapReduce Job Cards */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-[#F4F4F5] flex items-center gap-2">
-            <Layers className="w-4 h-4 text-[#F4B860]" />
-            Hadoop MapReduce Pipeline Job History (7 Jobs)
-          </h2>
-          <span className="text-xs font-mono text-[#2DD4BF] bg-[#2DD4BF]/10 px-2 py-0.5 rounded border border-[#2DD4BF]/20">
-            {jobs.length} Jobs Configured
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {jobs.map((job) => {
-            const dirKey = jobDirMapping[job.jobName] || job.jobName.toLowerCase();
-            return (
-              <div
-                key={job.jobId}
-                className="rounded-xl bg-[#191B20] border border-[#282A30] p-5 shadow-sm hover:border-[#3A3D46] transition-standard flex flex-col justify-between space-y-3"
-              >
-                {/* Card Header */}
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="text-sm font-bold text-[#F4F4F5] tracking-tight">{job.jobName}</h3>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
-                      {job.status}
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono text-[#A1A1AA] block mt-0.5">
-                    Job ID: {job.jobId}
-                  </span>
-                  {job.description && (
-                    <p className="text-xs text-[#A1A1AA] mt-1.5 line-clamp-2">
-                      {job.description}
-                    </p>
-                  )}
-                </div>
-
-                {/* Records Count */}
-                <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
-                  <div className="p-2 rounded-lg bg-[#14161B] border border-[#282A30]">
-                    <span className="text-[10px] text-[#A1A1AA] block uppercase">Input Records</span>
-                    <span className="font-mono font-bold text-[#F4F4F5]">
-                      {job.inputRecords?.toLocaleString() || '100,836'}
-                    </span>
-                  </div>
-
-                  <div className="p-2 rounded-lg bg-[#14161B] border border-[#282A30]">
-                    <span className="text-[10px] text-[#A1A1AA] block uppercase">Output Records</span>
-                    <span className="font-mono font-bold text-[#2DD4BF]">
-                      {job.outputRecords?.toLocaleString() || '—'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Output Path & View Partition Button */}
-                <div className="pt-2 border-t border-[#282A30] space-y-2">
-                  <div className="flex items-center justify-between text-[11px] text-[#A1A1AA]">
-                    <span className="flex items-center gap-1">
-                      <FolderOpen className="w-3.5 h-3.5" /> Output Partition:
-                    </span>
-                    <span className="font-mono text-[#F4B860] text-[10px] truncate max-w-[140px]" title={job.outputPath}>
-                      part-r-00000
-                    </span>
-                  </div>
-
-                  <button
-                    onClick={() => handleInspectPartition(dirKey)}
-                    className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-[#14161B] hover:bg-[#282A30] text-[#F4F4F5] border border-[#282A30] text-xs font-medium transition-standard"
-                  >
-                    <Eye className="w-3.5 h-3.5 text-[#F4B860]" />
-                    <span>View Partition Output</span>
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Academic Execution Commands Box for Viva Voce */}
-      <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-5 shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-bold text-[#F4F4F5] uppercase tracking-wider flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-[#F4B860]" />
-            Hadoop CLI & YARN Submission Commands (Academic Defense Reference)
-          </h2>
-          <span className="text-[11px] font-mono text-[#A1A1AA]">
-            Uber-JAR: cinemetrics-mapreduce-1.0.0.jar
-          </span>
-        </div>
-        <div className="p-4 rounded-lg bg-[#101114] border border-[#282A30] font-mono text-xs text-[#D4D4D8] space-y-2.5 overflow-x-auto">
-          <p className="text-[#A1A1AA]"># 1. Package Java MapReduce classes into Uber-JAR via Maven:</p>
-          <p className="text-[#F4F4F5] bg-[#14161B] p-1.5 rounded border border-[#282A30]">mvn clean package</p>
-
-          <p className="text-[#A1A1AA]"># 2. Upload MovieLens dataset to HDFS distributed file system:</p>
-          <p className="text-[#F4F4F5] bg-[#14161B] p-1.5 rounded border border-[#282A30]">hdfs dfs -mkdir -p /cinemetrics/input</p>
-          <p className="text-[#F4F4F5] bg-[#14161B] p-1.5 rounded border border-[#282A30]">hdfs dfs -put data/raw/ratings.csv /cinemetrics/input/</p>
-          <p className="text-[#F4F4F5] bg-[#14161B] p-1.5 rounded border border-[#282A30]">hdfs dfs -put data/raw/movies.csv /cinemetrics/input/</p>
-
-          <p className="text-[#A1A1AA]"># 3. Submit MapReduce jobs to Hadoop YARN ResourceManager:</p>
-          <p className="text-[#F4F4F5] bg-[#14161B] p-1.5 rounded border border-[#282A30]">hadoop jar hadoop/target/cinemetrics-mapreduce-1.0.0.jar avgrating /cinemetrics/input/ratings.csv /cinemetrics/output/avgrating</p>
-          <p className="text-[#F4F4F5] bg-[#14161B] p-1.5 rounded border border-[#282A30]">hadoop jar hadoop/target/cinemetrics-mapreduce-1.0.0.jar genrepop /cinemetrics/input/ratings.csv /cinemetrics/output/genrepop -files /cinemetrics/input/movies.csv</p>
-
-          <p className="text-[#A1A1AA]"># 4. Inspect reducer output partition files:</p>
-          <p className="text-[#F4F4F5] bg-[#14161B] p-1.5 rounded border border-[#282A30]">hdfs dfs -cat /cinemetrics/output/avgrating/part-r-00000 | head -n 10</p>
-        </div>
-      </div>
-
-      {/* Raw Reducer Partition Viewer Modal */}
-      {previewModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
-          onClick={() => setPreviewModalOpen(false)}
-        >
-          <div
-            className="w-full max-w-4xl rounded-2xl bg-[#191B20] border border-[#3A3D46] shadow-2xl p-6 overflow-hidden max-h-[90vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-4 border-b border-[#282A30]">
-              <div className="flex items-center gap-2">
-                <FileCode className="w-5 h-5 text-[#F4B860]" />
-                <div>
-                  <h3 className="text-base font-bold text-[#F4F4F5]">
-                    Raw Reducer Output Partition Inspector
-                  </h3>
-                  <p className="text-xs text-[#A1A1AA]">
-                    Direct read of genuine TSV partition generated by Hadoop Reducer
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setPreviewModalOpen(false)}
-                className="p-1.5 rounded-lg text-[#A1A1AA] hover:text-[#F4F4F5] hover:bg-[#21242B]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {previewLoading ? (
-              <div className="py-20">
-                <LoadingSpinner text="Reading raw TSV lines from reducer partition on disk..." />
-              </div>
-            ) : previewError ? (
-              <div className="py-12 text-center text-xs text-red-400">
-                {previewError}
-              </div>
-            ) : previewData ? (
-              <div className="overflow-y-auto py-4 space-y-4 flex-1 pr-1 text-xs">
-                {/* Partition Metadata Bar */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 rounded-lg bg-[#14161B] border border-[#282A30] font-mono text-[11px]">
-                  <div>
-                    <span className="text-[#A1A1AA] block text-[10px]">FILE NAME:</span>
-                    <span className="text-[#F4B860] font-bold">{previewData.fileName}</span>
-                  </div>
-                  <div>
-                    <span className="text-[#A1A1AA] block text-[10px]">FILE SIZE:</span>
-                    <span className="text-[#F4F4F5]">{(previewData.fileSizeBytes / 1024).toFixed(1)} KB</span>
-                  </div>
-                  <div>
-                    <span className="text-[#A1A1AA] block text-[10px]">TOTAL PARTITIONS:</span>
-                    <span className="text-[#2DD4BF] font-bold">{previewData.totalPartitions}</span>
-                  </div>
-                  <div>
-                    <span className="text-[#A1A1AA] block text-[10px]">SAMPLE LINES:</span>
-                    <span className="text-[#F4F4F5]">{previewData.sampleLinesCount}</span>
-                  </div>
-                </div>
-
-                <div className="text-xs text-[#D4D4D8]">
-                  <strong>Schema:</strong> <code className="text-[#F4B860] bg-[#14161B] px-1.5 py-0.5 rounded font-mono">{previewData.schema}</code>
-                </div>
-
-                {/* Raw Partition Output Terminal Box */}
-                <div className="rounded-xl bg-[#101114] border border-[#282A30] p-4 font-mono text-xs text-[#D4D4D8] overflow-x-auto max-h-80">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="text-[#A1A1AA] border-b border-[#282A30] pb-1">
-                        <th className="w-12 text-[#646A84]">Line</th>
-                        <th>TSV Data (Tab Separated Values)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#282A30]/40">
-                      {previewData.sampleLines.map((line, idx) => (
-                        <tr key={idx} className="hover:bg-[#191B20]">
-                          <td className="text-[#646A84] py-1 select-none">{idx + 1}</td>
-                          <td className="py-1 text-[#F4F4F5]">{line}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <p className="text-[11px] text-[#A1A1AA] leading-relaxed">
-                  ✓ Proves the Hadoop MapReduce job ran and wrote tabular reducer records with tab delimiters (<code className="text-[#F4B860]">\t</code>).
-                </p>
-              </div>
-            ) : null}
-
-            <div className="pt-4 border-t border-[#282A30] flex justify-end">
-              <button
-                onClick={() => setPreviewModalOpen(false)}
-                className="px-4 py-2 rounded-lg bg-[#282A30] hover:bg-[#3A3D46] text-[#F4F4F5] text-xs font-semibold"
-              >
-                Close Inspector
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <StoredOutputs />
+      <JobHistory />
+      <section aria-labelledby="run-title" className={PANEL}>
+        <h2 id="run-title" className={TITLE}>Running the jobs on a cluster</h2>
+        <p className="mt-1 max-w-[68ch] text-[15px] leading-relaxed text-ink-2">
+          Build the jobs with <code className="text-ink">mvn clean package</code> in <code className="text-ink">hadoop/</code>, then run{' '}
+          <code className="text-ink">scripts/run_hadoop_jobs.sh</code>. It copies the two CSV files into HDFS, runs the seven jobs with{' '}
+          <code className="text-ink">hadoop jar</code>, and lists the output folders. Copy those folders into <code className="text-ink">data/processed/</code>{' '}
+          and restart the API to serve them.
+        </p>
+      </section>
     </div>
   );
 }

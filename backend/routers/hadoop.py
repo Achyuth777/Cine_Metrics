@@ -10,6 +10,7 @@ job history, retrieving dataset metadata, and inspecting raw reducer partition o
 - GET /api/dataset/info           — Dataset metadata and file specifications
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -30,10 +31,10 @@ logger = logging.getLogger("cinemetrics.routers.hadoop")
 router = APIRouter(prefix="/api", tags=["Hadoop"])
 
 
-def _try_connect(url: str, timeout: int = 2) -> dict | None:
+def _try_connect_blocking(url: str, timeout: int = 2) -> dict | None:
     """
     Attempt to connect to a Hadoop REST endpoint and parse JSON.
-    Returns None if unreachable or timed out.
+    Returns None if unreachable or timed out. Blocks; call through _try_connect.
     """
     try:
         req = Request(url, headers={"User-Agent": "CineMetrics-ClusterTelemetry/1.0"})
@@ -42,6 +43,15 @@ def _try_connect(url: str, timeout: int = 2) -> dict | None:
     except Exception as e:
         logger.debug(f"Hadoop ping to {url} failed: {e}")
         return None
+
+
+async def _try_connect(url: str, timeout: int = 2) -> dict | None:
+    """
+    The same probe, run on a worker thread. urlopen blocks, and calling it
+    directly inside an async handler froze the whole API (every endpoint)
+    for as long as the probe waited when no cluster answered.
+    """
+    return await asyncio.to_thread(_try_connect_blocking, url, timeout)
 
 
 @router.get("/hadoop/status", response_model=HadoopStatus)
@@ -53,9 +63,11 @@ async def get_hadoop_status():
     """
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # Probe HDFS NameNode
-    hdfs_info = _try_connect(f"{settings.HDFS_NAMENODE_URL}/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo")
-    yarn_info = _try_connect(f"{settings.YARN_RESOURCEMANAGER_URL}/ws/v1/cluster/info")
+    # Probe HDFS NameNode and YARN ResourceManager at the same time
+    hdfs_info, yarn_info = await asyncio.gather(
+        _try_connect(f"{settings.HDFS_NAMENODE_URL}/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo"),
+        _try_connect(f"{settings.YARN_RESOURCEMANAGER_URL}/ws/v1/cluster/info"),
+    )
 
     connected = bool(hdfs_info or yarn_info)
     engine = data_loader.provenance_info.get("engine", "python-reference")
@@ -113,7 +125,7 @@ async def get_hadoop_jobs():
     note = data_loader.provenance_info.get("note")
 
     # 1. Check live JobHistory server if cluster is online
-    live_history = _try_connect(f"{settings.JOBHISTORY_URL}/ws/v1/history/mapreduce/jobs")
+    live_history = await _try_connect(f"{settings.JOBHISTORY_URL}/ws/v1/history/mapreduce/jobs")
     if live_history and "jobs" in live_history:
         try:
             job_list = live_history["jobs"].get("job", [])

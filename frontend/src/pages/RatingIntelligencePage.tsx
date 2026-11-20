@@ -1,367 +1,179 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  Sparkles,
-  Calendar,
-  Clock,
-  TrendingUp,
-  Award,
-  Info,
-  Layers,
-  Star,
-  ExternalLink,
-  Sliders,
-  Filter,
-  ArrowUpRight,
-  BookOpen
-} from 'lucide-react';
-import {
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid
-} from 'recharts';
+import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
-import { useApi } from '../hooks/useApi';
-import { HiddenGem } from '../types';
-import ChartCard from '../components/ChartCard';
-import { LoadingSpinner, ErrorState } from '../components/LoadingState';
+import BayesPullChart from '../components/bayes/BayesPullChart';
+import { EmptyState, ErrorState, LoadingSpinner } from '../components/LoadingState';
+import BarList from '../components/system/BarList';
+import Metric from '../components/system/Metric';
+import PageHeader from '../components/system/PageHeader';
+import ScrollHint from '../components/system/ScrollHint';
+import { buttonClass } from '../components/system/buttonClass';
+import { useQuery } from '../hooks/useQuery';
+import { PRIOR_WEIGHT } from '../lib/bayesPull';
+import { explorerSearchPath } from '../lib/explorerParams';
+import { describeError, formatCount, formatScore, titleWithoutYear } from '../lib/format';
 
-export default function RatingIntelligencePage() {
-  const { data: ratingDist, loading: distLoading } = useApi(api.getRatingDistribution);
-  const { data: yearRatings, loading: yearLoading } = useApi(api.getYearRatings);
-  const { data: ratingTrends, loading: trendsLoading } = useApi(api.getRatingTrends);
+const PANEL = 'lit-panel rounded-panel bg-surface-1 p-5 sm:p-6';
+const TITLE = 'text-lg font-semibold text-ink';
+const FIELD = 'h-10 w-24 rounded-control border border-line-strong bg-canvas px-3 text-sm text-ink hover:border-ink-2';
+const LABEL = 'mb-1.5 block text-[13px] font-medium text-ink-2';
 
-  // Dynamic Interactive Hidden Gems Thresholds
-  const [minRatingThreshold, setMinRatingThreshold] = useState<number>(4.0);
-  const [maxCountThreshold, setMaxCountThreshold] = useState<number>(80);
-  const [minCountThreshold, setMinCountThreshold] = useState<number>(10);
-  const [gemsList, setGemsList] = useState<HiddenGem[]>([]);
-  const [gemsLoading, setGemsLoading] = useState(false);
+function Failed({ error, subject, retry }: { error: unknown; subject: string; retry: () => void }) {
+  const failure = describeError(error, subject);
+  return <ErrorState title={failure.title} message={failure.message} onRetry={retry} />;
+}
 
-  const navigate = useNavigate();
+/** Two real films: a perfect average from one rating, and the top film by adjusted score. */
+function OneVoteOrHundreds() {
+  const pair = useQuery('ratings-pair', async (signal) => {
+    const [single, leader] = await Promise.all([
+      api.getMovies({ sortBy: 'avgRating', sortOrder: 'desc', pageSize: 1, minCount: 1, minRating: 5 }, signal),
+      api.getMovies({ sortBy: 'weightedRating', sortOrder: 'desc', pageSize: 1, minCount: 5 }, signal)
+    ]);
+    return [single.movies[0], leader.movies[0]].filter(Boolean);
+  });
+  if (pair.status === 'error') return <Failed error={pair.error} subject="the example films" retry={pair.retry} />;
+  if (pair.status !== 'ready') return <LoadingSpinner text="Loading two example films…" />;
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      {pair.data.map((film) => (
+        <div key={film.movieId} className="rounded-control bg-surface-2/60 p-4">
+          <Link to={explorerSearchPath(film.title)} className="rounded-sm font-semibold text-ink underline-offset-4 hover:text-accent hover:underline">
+            {titleWithoutYear(film.title)}
+          </Link>
+          <span className="ml-2 text-[13px] text-ink-2">{film.year}</span>
+          <dl className="mt-3 grid grid-cols-3 gap-3">
+            <Metric label="Average rating" value={formatScore(film.avgRating)} />
+            <Metric label={film.ratingCount === 1 ? 'Rating' : 'Ratings'} value={formatCount(film.ratingCount)} />
+            <Metric label="Adjusted score" value={formatScore(film.weightedRating)} accent />
+          </dl>
+        </div>
+      ))}
+    </div>
+  );
+}
 
-  const fetchDynamicGems = () => {
-    setGemsLoading(true);
-    api.getHiddenGems({
-      limit: 25,
-      minRating: minRatingThreshold,
-      minCount: minCountThreshold,
-      maxCount: maxCountThreshold
-    })
-      .then(res => {
-        setGemsList(res);
-        setGemsLoading(false);
-      })
-      .catch(err => {
-        console.error('Failed to fetch gems:', err);
-        setGemsLoading(false);
-      });
+function Formula() {
+  const overview = useQuery('overview', () => api.getOverview());
+  const mean = overview.status === 'ready' ? formatScore(overview.data.globalAverageRating, 4) : '…';
+  return (
+    <div className="space-y-3 text-[15px] leading-relaxed text-ink-2">
+      <p className="rounded-control bg-canvas px-4 py-3 font-mono text-sm text-ink">adjusted score = (v ÷ (v + m)) × R + (m ÷ (v + m)) × C</p>
+      <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+        <div>
+          <dt className="inline font-semibold text-ink">v</dt> <dd className="inline">the film’s number of ratings</dd>
+        </div>
+        <div>
+          <dt className="inline font-semibold text-ink">R</dt> <dd className="inline">the film’s average rating</dd>
+        </div>
+        <div>
+          <dt className="inline font-semibold text-ink">m = {PRIOR_WEIGHT}</dt>{' '}
+          <dd className="inline">how many “average” ratings every film starts with</dd>
+        </div>
+        <div>
+          <dt className="inline font-semibold text-ink">C = {mean}</dt> <dd className="inline">the average of every rating in the dataset</dd>
+        </div>
+      </dl>
+      <p className="text-[13px]">
+        Where it is computed: <code className="text-ink">backend/data_loader.py</code>, <code className="text-ink">_compute_weighted_rating</code>,
+        for every film the API serves. The Hadoop job <code className="text-ink">HiddenGemsJob.java</code> uses the same formula with
+        m = 10 and C = 3.5 by default, so its stored scores can differ from the API’s in the third decimal.
+      </p>
+    </div>
+  );
+}
+
+type Thresholds = { minRating: number; minCount: number; maxCount: number };
+const GEM_DEFAULTS: Thresholds = { minRating: 4, minCount: 10, maxCount: 80 };
+
+function HiddenGems() {
+  const [applied, setApplied] = useState<Thresholds>(GEM_DEFAULTS);
+  const [draft, setDraft] = useState({ minRating: '4', minCount: '10', maxCount: '80' });
+  const ratingId = useId();
+  const minId = useId();
+  const maxId = useId();
+  const errorId = useId();
+  const gems = useQuery(`gems:${applied.minRating}:${applied.minCount}:${applied.maxCount}`, () =>
+    api.getHiddenGems({ limit: 25, ...applied })
+  );
+
+  const r = Number(draft.minRating);
+  const lo = Number(draft.minCount);
+  const hi = Number(draft.maxCount);
+  const invalid = !(r >= 0.5 && r <= 5)
+    ? 'Minimum average must be between 0.5 and 5.'
+    : !(Number.isInteger(lo) && lo >= 1)
+      ? 'Fewest ratings must be a whole number, 1 or more.'
+      : !(Number.isInteger(hi) && hi >= lo)
+        ? 'Most ratings must be a whole number at least as large as the fewest.'
+        : null;
+
+  const apply = (event: FormEvent) => {
+    event.preventDefault();
+    if (!invalid) setApplied({ minRating: r, minCount: lo, maxCount: hi });
   };
 
-  useEffect(() => {
-    fetchDynamicGems();
-  }, [minRatingThreshold, maxCountThreshold, minCountThreshold]);
-
-  if (distLoading || yearLoading || trendsLoading) {
-    return <LoadingSpinner text="Computing multi-job MapReduce time-series and Bayesian statistics..." />;
-  }
-
-  // Filter yearRatings to valid years (1920 to 2018) and sort chronologically
-  const filteredYears = (yearRatings || [])
-    .filter(y => y.year !== 'Unknown' && Number(y.year) >= 1920 && Number(y.year) <= 2018)
-    .sort((a, b) => Number(a.year) - Number(b.year));
-
-  // Aggregate monthly trends to annual trends for readability
-  const yearlyTrendsMap = new Map<string, { year: string; count: number; sum: number }>();
-  (ratingTrends || []).forEach(t => {
-    const yr = t.yearMonth.split('-')[0];
-    const existing = yearlyTrendsMap.get(yr) || { year: yr, count: 0, sum: 0 };
-    const cnt = t.count || 0;
-    existing.count += cnt;
-    existing.sum += t.avgRating * cnt;
-    yearlyTrendsMap.set(yr, existing);
-  });
-
-  const yearlyTrends = Array.from(yearlyTrendsMap.values())
-    .map(y => ({
-      year: y.year,
-      ratingCount: y.count,
-      avgRating: y.count > 0 ? Number((y.sum / y.count).toFixed(2)) : 0
-    }))
-    .sort((a, b) => Number(a.year) - Number(b.year));
-
   return (
-    <div className="space-y-6 max-w-7xl mx-auto animate-fade-in pb-16">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#282A30]">
+    <>
+      <form onSubmit={apply} className="flex flex-wrap items-end gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F4F4F5]">
-              Rating Intelligence & Bayesian Gems
-            </h1>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#F4B860]/10 text-[#F4B860] border border-[#F4B860]/30 font-mono font-medium">
-              Jobs 5, 6, 7
-            </span>
-          </div>
-          <p className="text-sm text-[#A1A1AA] mt-1">
-            Temporal rating dynamics, release year evolution, and Bayesian detection of under-watched cinema masterpieces.
-          </p>
+          <label htmlFor={ratingId} className={LABEL}>Minimum average</label>
+          <input id={ratingId} type="number" step="0.1" min="0.5" max="5" className={FIELD} value={draft.minRating}
+            aria-describedby={invalid ? errorId : undefined} onChange={(e) => setDraft({ ...draft, minRating: e.target.value })} />
         </div>
-      </div>
-
-      {/* Academic Distinction Callout */}
-      <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-4 text-xs text-[#A1A1AA] flex items-start gap-3 shadow-sm">
-        <Info className="w-5 h-5 text-[#F4B860] shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <strong className="text-[#F4F4F5] text-xs">Essential Distinction for Academic Evaluation:</strong>
-          <p className="leading-relaxed">
-            <span className="text-[#F4B860] font-semibold">1. Movie Release Year (Job 5):</span> Parsed from movie titles using regular expression matching (e.g. <em>Toy Story (1995)</em>). Tracks historical perception of production eras.
-            <br />
-            <span className="text-[#2DD4BF] font-semibold">2. Rating Submission Timestamp (Job 7):</span> Unix epoch integer from <code className="text-[#F4F4F5]">ratings.csv</code>, converted to calendar Year-Month in Map phase. Captures platform user activity surges from 1996 through 2018.
-          </p>
+        <div>
+          <label htmlFor={minId} className={LABEL}>Fewest ratings</label>
+          <input id={minId} type="number" step="1" min="1" className={FIELD} value={draft.minCount}
+            aria-describedby={invalid ? errorId : undefined} onChange={(e) => setDraft({ ...draft, minCount: e.target.value })} />
         </div>
-      </div>
-
-      {/* 2 Temporal Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Release Year Ratings Chart (Job 5) */}
-        <ChartCard
-          title="Perception by Release Year (Job 5: YearRatingJob)"
-          subtitle="Mean audience score by movie release decade (1920–2018)"
-        >
-          <div className="h-72 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={filteredYears} margin={{ top: 10, right: 10, left: -20, bottom: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#282A30" vertical={false} />
-                <XAxis
-                  dataKey="year"
-                  stroke="#A1A1AA"
-                  fontSize={10}
-                  tickLine={false}
-                  interval={12}
-                />
-                <YAxis
-                  domain={[2.5, 4.5]}
-                  stroke="#A1A1AA"
-                  fontSize={10}
-                  tickLine={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#191B20',
-                    border: '1px solid #3A3D46',
-                    borderRadius: '8px',
-                    color: '#F4F4F5',
-                    fontSize: '12px'
-                  }}
-                  formatter={(val: any) => [`${Number(val).toFixed(2)} ★`, 'Avg Rating']}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="avgRating"
-                  stroke="#F4B860"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 5, fill: '#F4B860' }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="mt-3 flex items-center justify-between text-xs text-[#A1A1AA] pt-2 border-t border-[#282A30]">
-            <span>Peak golden era: 1940s–1970s classics sustain high mean scores (~3.8 ★)</span>
-            <span className="text-[#F4B860] font-mono text-[11px]">Job 5 Reducer</span>
-          </div>
-        </ChartCard>
-
-        {/* Rating Submission Activity Over Time (Job 7) */}
-        <ChartCard
-          title="Platform Review Activity Timeline (Job 7: RatingTrendsJob)"
-          subtitle="Annual review submissions from MovieLens Unix epoch timestamps"
-        >
-          <div className="h-72 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={yearlyTrends} margin={{ top: 10, right: 10, left: -15, bottom: 10 }}>
-                <defs>
-                  <linearGradient id="colorCountTeal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2DD4BF" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#2DD4BF" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#282A30" vertical={false} />
-                <XAxis dataKey="year" stroke="#A1A1AA" fontSize={10} tickLine={false} />
-                <YAxis stroke="#A1A1AA" fontSize={10} tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#191B20',
-                    border: '1px solid #3A3D46',
-                    borderRadius: '8px',
-                    color: '#F4F4F5',
-                    fontSize: '12px'
-                  }}
-                  formatter={(val: any) => [`${Number(val).toLocaleString()} reviews`, 'Activity']}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="ratingCount"
-                  stroke="#2DD4BF"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#colorCountTeal)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="mt-3 flex items-center justify-between text-xs text-[#A1A1AA] pt-2 border-t border-[#282A30]">
-            <span>Captures community review surges around 2000 and 2015</span>
-            <span className="text-[#2DD4BF] font-mono text-[11px]">Job 7 Reducer</span>
-          </div>
-        </ChartCard>
-      </div>
-
-      {/* Viva Voce Bayesian Shrinkage Mathematics Banner */}
-      <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-5 shadow-sm space-y-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-[#F4B860]">
-          <BookOpen className="w-4 h-4" />
-          <span>Academic Viva Focus: Why Raw Arithmetic Means Fail & How Bayesian Shrinkage Fixes It</span>
+        <div>
+          <label htmlFor={maxId} className={LABEL}>Most ratings</label>
+          <input id={maxId} type="number" step="1" min="1" className={FIELD} value={draft.maxCount}
+            aria-describedby={invalid ? errorId : undefined} onChange={(e) => setDraft({ ...draft, maxCount: e.target.value })} />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-[#D4D4D8] leading-relaxed">
-          <div className="space-y-1.5 p-3 rounded-lg bg-[#14161B] border border-[#282A30]">
-            <span className="text-red-400 font-semibold block">The Arithmetic Average Pitfall:</span>
-            A film with 1 single 5.0-star rating would hold an arithmetic average of 5.00 ★, erroneously topping
-            the global charts ahead of <em>The Shawshank Redemption</em> (317 reviews, 4.43 ★) or <em>Pulp Fiction</em> (307 reviews, 4.20 ★).
-          </div>
-          <div className="space-y-1.5 p-3 rounded-lg bg-[#14161B] border border-[#282A30]">
-            <span className="text-[#2DD4BF] font-semibold block">The Bayesian Solution (Job 6):</span>
-            We apply the true Bayesian formula <code className="text-[#F4B860] font-mono">WR = (v/(v+m))*R + (m/(v+m))*C</code> with prior weight <code className="text-[#F4B860] font-mono">m = 10</code>.
-            A 1-vote 5-star movie shrinks toward the global average <code className="text-[#F4B860] font-mono">C = 3.50</code>, giving a fair score of 3.64 ★.
-          </div>
-        </div>
-      </div>
+        <button type="submit" disabled={invalid !== null} title={invalid ?? undefined} className={buttonClass({ variant: 'secondary' })}>
+          Show films
+        </button>
+      </form>
+      {invalid && <p id={errorId} className="mt-2 text-[13px] text-danger">{invalid}</p>}
 
-      {/* Hidden Gems Dynamic Thresholds & Results */}
-      <div className="rounded-xl bg-[#191B20] border border-[#282A30] shadow-sm overflow-hidden space-y-4 p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-[#282A30]">
-          <div>
-            <h2 className="text-sm font-semibold text-[#F4F4F5] flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[#F4B860]" />
-              Interactive Hidden Gems Engine (Job 6: HiddenGemsJob)
-            </h2>
-            <p className="text-xs text-[#A1A1AA] mt-0.5">
-              Adjust minimum rating and maximum vote ceilings to discover overlooked cinema across the entire catalog.
-            </p>
-          </div>
-
-          {/* Interactive Threshold Inputs */}
-          <div className="flex flex-wrap items-center gap-3 text-xs">
-            <div className="flex items-center gap-1.5">
-              <label htmlFor="min-rating-input" className="text-[#A1A1AA] text-[11px]">Min Rating:</label>
-              <input
-                id="min-rating-input"
-                type="number"
-                step="0.1"
-                min="3.0"
-                max="5.0"
-                value={minRatingThreshold}
-                onChange={(e) => setMinRatingThreshold(Number(e.target.value))}
-                className="w-16 px-2 py-1 rounded bg-[#14161B] border border-[#282A30] text-[#F4B860] font-mono text-xs focus:border-[#F4B860]"
-              />
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <label htmlFor="max-votes-input" className="text-[#A1A1AA] text-[11px]">Max Votes:</label>
-              <input
-                id="max-votes-input"
-                type="number"
-                min="15"
-                max="300"
-                value={maxCountThreshold}
-                onChange={(e) => setMaxCountThreshold(Number(e.target.value))}
-                className="w-16 px-2 py-1 rounded bg-[#14161B] border border-[#282A30] text-[#F4F4F5] font-mono text-xs focus:border-[#F4B860]"
-              />
-            </div>
-
-            <span className="text-xs font-mono px-2 py-1 rounded bg-[#F4B860]/10 text-[#F4B860] border border-[#F4B860]/30 font-bold">
-              {gemsList.length} Gems Found
-            </span>
-          </div>
-        </div>
-
-        {/* Gems Table */}
-        {gemsLoading ? (
-          <div className="py-12">
-            <LoadingSpinner text="Computing Bayesian scores with updated thresholds..." />
-          </div>
-        ) : gemsList.length === 0 ? (
-          <div className="py-12 text-center text-xs text-[#A1A1AA]">
-            No hidden gems meet the specified criteria. Try lowering the minimum rating or increasing the maximum vote ceiling.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-[#A1A1AA]">
-              <thead className="bg-[#14161B] text-[11px] uppercase tracking-wider text-[#A1A1AA] border-b border-[#282A30]">
-                <tr>
-                  <th className="py-3 px-4">Rank & Title</th>
-                  <th className="py-3 px-3">Genres</th>
-                  <th className="py-3 px-3 text-right">Raw Audience Mean</th>
-                  <th className="py-3 px-3 text-right">Rating Count</th>
-                  <th className="py-3 px-3 text-right">Bayesian (WR)</th>
-                  <th className="py-3 px-4 text-right">Composite Score</th>
-                  <th className="py-3 px-4 text-center">Action</th>
+      <div className="mt-5">
+        {gems.status === 'error' && <Failed error={gems.error} subject="hidden gems" retry={gems.retry} />}
+        {gems.status === 'loading' && <LoadingSpinner text="Finding films…" />}
+        {gems.status === 'ready' && gems.data.length === 0 && (
+          <EmptyState title="No films match" message="Lower the minimum average, or widen the range of ratings." />
+        )}
+        {gems.status === 'ready' && gems.data.length > 0 && <ScrollHint className="mb-2" />}
+        {gems.status === 'ready' && gems.data.length > 0 && (
+          <div className="relative overflow-x-auto" role="region" aria-label="Hidden gems, scrollable table" tabIndex={0}>
+            <table className="w-full min-w-[36rem] text-left text-sm">
+              <caption className="sr-only">
+                Films averaging at least {applied.minRating} from {applied.minCount} to {applied.maxCount} ratings, ranked by gem score.
+              </caption>
+              <thead className="text-[13px] text-ink-2">
+                <tr className="border-b border-line">
+                  <th scope="col" className="py-2 pr-3 font-medium">#</th>
+                  <th scope="col" className="py-2 pr-3 font-medium">Film</th>
+                  <th scope="col" className="px-2 py-2 text-right font-medium">Average</th>
+                  <th scope="col" className="px-2 py-2 text-right font-medium">Ratings</th>
+                  <th scope="col" className="px-2 py-2 text-right font-medium">Adjusted</th>
+                  <th scope="col" className="py-2 pl-2 text-right font-medium">Gem score</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#282A30]">
-                {gemsList.map((gem, idx) => (
-                  <tr key={gem.movieId} className="hover:bg-[#21242B] transition-standard">
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-2.5">
-                        <span className="w-5 h-5 rounded bg-[#F4B860]/10 border border-[#F4B860]/30 text-[#F4B860] flex items-center justify-center font-mono text-[10px] font-bold shrink-0">
-                          {idx + 1}
-                        </span>
-                        <div>
-                          <p className="font-semibold text-[#F4F4F5]">{gem.title}</p>
-                          <p className="text-[10px] text-[#A1A1AA] font-mono">ID: #{gem.movieId}</p>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-3">
-                      <span className="text-[#D4D4D8] text-[11px]">{gem.genres}</span>
-                    </td>
-
-                    <td className="py-3 px-3 text-right font-mono font-bold text-[#F4B860] tabular-nums">
-                      {gem.avgRating.toFixed(2)} ★
-                    </td>
-
-                    <td className="py-3 px-3 text-right font-mono text-[#F4F4F5] font-semibold tabular-nums">
-                      {gem.ratingCount} votes
-                    </td>
-
-                    <td className="py-3 px-3 text-right font-mono text-[#2DD4BF] font-semibold tabular-nums">
-                      {gem.weightedScore ? `${gem.weightedScore.toFixed(2)} ★` : '—'}
-                    </td>
-
-                    <td className="py-3 px-4 text-right">
-                      <span className="inline-block px-2 py-0.5 rounded bg-[#14161B] border border-[#282A30] text-[#F4B860] font-mono font-bold tabular-nums">
-                        {gem.hiddenGemScore.toFixed(3)}
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-4 text-center">
-                      <button
-                        onClick={() => navigate(`/movies?search=${encodeURIComponent(gem.title)}`)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#14161B] hover:bg-[#282A30] text-[#D4D4D8] hover:text-[#F4B860] border border-[#282A30] text-[11px] transition-standard"
-                      >
-                        Inspect <ArrowUpRight className="w-3 h-3" />
-                      </button>
-                    </td>
+              <tbody className="divide-y divide-line">
+                {gems.data.map((gem, index) => (
+                  <tr key={gem.movieId}>
+                    <td className="py-2.5 pr-3 text-ink-2">{index + 1}</td>
+                    <th scope="row" className="py-2.5 pr-3 font-medium">
+                      <Link to={explorerSearchPath(gem.title)} className="rounded-sm text-ink underline-offset-4 hover:text-accent hover:underline">
+                        {titleWithoutYear(gem.title)}
+                      </Link>
+                      <span className="block text-[13px] font-normal text-ink-2">{gem.year ?? 'Year unknown'}</span>
+                    </th>
+                    <td className="px-2 py-2.5 text-right text-ink">{formatScore(gem.avgRating)}</td>
+                    <td className="px-2 py-2.5 text-right text-ink">{formatCount(gem.ratingCount)}</td>
+                    <td className="px-2 py-2.5 text-right font-semibold text-accent">{formatScore(gem.weightedScore)}</td>
+                    <td className="py-2.5 pl-2 text-right text-ink-2">{gem.hiddenGemScore.toFixed(3)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -369,6 +181,135 @@ export default function RatingIntelligencePage() {
           </div>
         )}
       </div>
+      <p className="mt-3 text-[13px] leading-relaxed text-ink-2">
+        Gem score, as <code className="text-ink">backend/routers/analytics.py</code> computes it: average ÷ log₂(ratings + 2). It
+        favours high averages from fewer ratings. It only orders this list; it is not the adjusted score.
+      </p>
+    </>
+  );
+}
+
+function Block({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <h3 className="font-semibold text-ink">{title}</h3>
+      <div className="mt-3">{children}</div>
+    </div>
+  );
+}
+
+function ByDecade() {
+  const years = useQuery('ratings-years', () => api.getYearRatings());
+  if (years.status === 'error') return <Failed error={years.error} subject="ratings by release year" retry={years.retry} />;
+  if (years.status !== 'ready') return <LoadingSpinner text="Loading release years…" />;
+  const byDecade = new Map<number, { count: number; sum: number }>();
+  for (const y of years.data) {
+    const year = Number(y.year);
+    if (!Number.isFinite(year)) continue;
+    const decade = Math.floor(year / 10) * 10;
+    const entry = byDecade.get(decade) ?? { count: 0, sum: 0 };
+    entry.count += y.ratingCount;
+    entry.sum += y.avgRating * y.ratingCount;
+    byDecade.set(decade, entry);
+  }
+  const rows = [...byDecade.entries()].sort(([a], [b]) => a - b);
+  return (
+    <>
+      <BarList
+        caption="Ratings given to films from each release decade, with the average of those ratings."
+        labelHeader="Release decade"
+        valueHeader="Ratings, and their average in stars"
+        rows={rows.map(([decade, e]) => ({
+          key: String(decade),
+          label: <span className="tabular-nums">{decade}s</span>,
+          value: e.count,
+          valueText: formatCount(e.count),
+          note: `${formatScore(e.sum / e.count)} ★`
+        }))}
+      />
+      <p className="mt-2 text-[13px] text-ink-2">Bar: number of ratings. After it: their average, in stars. The release year comes from the film’s title.</p>
+    </>
+  );
+}
+
+function ByYearRated() {
+  const trends = useQuery('ratings-trends', () => api.getRatingTrends());
+  if (trends.status === 'error') return <Failed error={trends.error} subject="rating activity" retry={trends.retry} />;
+  if (trends.status !== 'ready') return <LoadingSpinner text="Loading rating activity…" />;
+  const byYear = new Map<string, number>();
+  for (const t of trends.data) byYear.set(t.yearMonth.slice(0, 4), (byYear.get(t.yearMonth.slice(0, 4)) ?? 0) + t.count);
+  const rows = [...byYear.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const busiest = rows.reduce((best, row) => (row[1] > best[1] ? row : best), rows[0]);
+  return (
+    <>
+      <BarList
+        caption="Number of ratings submitted in each calendar year."
+        labelHeader="Year rated"
+        valueHeader="Ratings"
+        rows={rows.map(([year, count]) => ({
+          key: year,
+          label: <span className="tabular-nums">{year}</span>,
+          value: count,
+          valueText: formatCount(count),
+          highlight: year === busiest[0]
+        }))}
+      />
+      <p className="mt-2 text-[13px] text-ink-2">
+        Bar: ratings submitted that year, from each rating’s timestamp. {rows[0]?.[0]} and {rows[rows.length - 1]?.[0]} are partial years.
+      </p>
+    </>
+  );
+}
+
+export default function RatingIntelligencePage() {
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        title="Ratings"
+        description="Why a five-star film with one rating ranks below a film rated a little lower by hundreds of people, and how the adjustment works."
+      />
+
+      <section aria-labelledby="why-title" className={PANEL}>
+        <h2 id="why-title" className={TITLE}>A handful of ratings or hundreds</h2>
+        <p className="mb-4 mt-1 max-w-[70ch] text-[15px] leading-relaxed text-ink-2">
+          A perfect score from one or two people says little about a film; hundreds of ratings averaging just over four say a lot. The adjusted
+          score blends each film’s average with the dataset’s average, and trusts the film’s own average more as its ratings add up.
+        </p>
+        <OneVoteOrHundreds />
+      </section>
+
+      <section aria-labelledby="formula-title" className={PANEL}>
+        <h2 id="formula-title" className={TITLE}>The formula, as implemented</h2>
+        <div className="mt-3">
+          <Formula />
+        </div>
+      </section>
+
+      <BayesPullChart />
+
+      <section aria-labelledby="gems-title" className={PANEL}>
+        <h2 id="gems-title" className={TITLE}>Well rated, rarely seen</h2>
+        <p className="mb-4 mt-1 max-w-[70ch] text-[15px] leading-relaxed text-ink-2">
+          Films with a high average from a modest number of ratings. Set the limits, then show the films. The API computes the
+          list over every film in the stored snapshot.
+        </p>
+        <HiddenGems />
+      </section>
+
+      <section aria-labelledby="time-title" className={PANEL}>
+        <h2 id="time-title" className={TITLE}>Ratings over time</h2>
+        <p className="mb-5 mt-1 max-w-[70ch] text-[15px] leading-relaxed text-ink-2">
+          Two different clocks: when a film was released, and when someone rated it.
+        </p>
+        <div className="grid gap-8 lg:grid-cols-2">
+          <Block title="By the film’s release decade">
+            <ByDecade />
+          </Block>
+          <Block title="By the year the rating was given">
+            <ByYearRated />
+          </Block>
+        </div>
+      </section>
     </div>
   );
 }

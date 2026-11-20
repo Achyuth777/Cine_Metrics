@@ -1,1145 +1,844 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import clsx from 'clsx';
 import {
-  Search,
-  Filter,
-  ArrowUpDown,
-  Star,
-  Film,
-  Calendar,
-  X,
+  ArrowDown,
+  ArrowUp,
   ChevronLeft,
   ChevronRight,
-  TrendingUp,
-  Award,
-  ExternalLink,
-  Layers,
   LayoutGrid,
   List,
-  CheckSquare,
-  Square,
-  Columns2,
-  Info,
   RotateCcw,
-  SlidersHorizontal
+  Search,
+  SlidersHorizontal,
+  X
 } from 'lucide-react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Cell
-} from 'recharts';
 import { api } from '../api';
-import { MovieSummary, MovieDetail, PaginatedMovies, MovieComparisonResponse } from '../types';
-import { LoadingSpinner, ErrorState, EmptyState } from '../components/LoadingState';
+import { EmptyState, ErrorState, LoadingSpinner } from '../components/LoadingState';
+import GenrePicker from '../components/movies/GenrePicker';
+import MovieCompareDialog from '../components/movies/MovieCompareDialog';
+import MovieDetailDrawer from '../components/movies/MovieDetailDrawer';
+import FilmPoster from '../components/poster/FilmPoster';
+import { usePosterTilt } from '../components/poster/usePosterTilt';
+import { buttonClass } from '../components/system/buttonClass';
+import Metric from '../components/system/Metric';
+import PageHeader from '../components/system/PageHeader';
+import { useQuery } from '../hooks/useQuery';
+import {
+  DEFAULT_STATE,
+  MAX_COMPARE,
+  PAGE_SIZE,
+  SORT_OPTIONS,
+  activeFilterChips,
+  defaultOrderFor,
+  parseExplorerParams,
+  toApiQuery,
+  toSearchParams,
+  type ExplorerState,
+  type SortKey
+} from '../lib/explorerParams';
+import { describeError, formatCount, formatScore, titleWithoutYear } from '../lib/format';
+import { TMDB_ENABLED, TMDB_NOTICE } from '../lib/tmdb';
+import type { MovieSummary } from '../types';
+
+const FIELD =
+  'h-10 w-full rounded-control border border-line-strong bg-canvas px-3 text-sm text-ink tabular-nums placeholder:text-ink-2 transition-colors duration-150 hover:border-ink-2';
+const FIELD_LABEL = 'mb-1.5 block text-[13px] font-medium text-ink-2';
+const COMPARE_FULL = `The compare list is full (${MAX_COMPARE} films). Remove one to add another.`;
+
+/** The text fields hold drafts. They apply together when the form is submitted, as before the redesign. */
+type Draft = { search: string; minRating: string; minCount: string; minYear: string; maxYear: string };
+
+const draftFrom = (state: ExplorerState): Draft => ({
+  search: state.search,
+  minRating: state.minRating === null ? '' : String(state.minRating),
+  minCount: state.minCount === 0 ? '' : String(state.minCount),
+  minYear: state.minYear === null ? '' : String(state.minYear),
+  maxYear: state.maxYear === null ? '' : String(state.maxYear)
+});
+
+const toNumber = (raw: string): number | null => {
+  if (raw.trim() === '') return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+};
+
+/** The Explorer's state as the address bar holds it right now. */
+const readUrl = (): ExplorerState => parseExplorerParams(new URLSearchParams(window.location.search));
+
+type Selection = { id: number; title: string };
+
+type ResultsProps = {
+  films: MovieSummary[];
+  selectedIds: number[];
+  onToggleCompare: (film: MovieSummary) => void;
+  onOpenDetail: (id: number) => void;
+};
+
+function CompareCheckbox({
+  film,
+  checked,
+  full,
+  onToggle,
+  withLabel = false
+}: {
+  film: MovieSummary;
+  checked: boolean;
+  full: boolean;
+  onToggle: (film: MovieSummary) => void;
+  withLabel?: boolean;
+}) {
+  const blocked = full && !checked;
+  const box = (
+    <input
+      type="checkbox"
+      checked={checked}
+      disabled={blocked}
+      onChange={() => onToggle(film)}
+      aria-label={withLabel ? undefined : `Compare ${titleWithoutYear(film.title)}`}
+      title={blocked ? COMPARE_FULL : undefined}
+      className="cm-check"
+    />
+  );
+  if (!withLabel) return box;
+  return (
+    <label
+      className={clsx('flex shrink-0 items-center gap-2 text-[13px] text-ink-2', blocked ? 'cursor-not-allowed' : 'cursor-pointer')}
+      title={blocked ? COMPARE_FULL : undefined}
+    >
+      {box}
+      Compare
+      <span className="sr-only"> {titleWithoutYear(film.title)}</span>
+    </label>
+  );
+}
+
+function ExternalLinks({ film }: { film: MovieSummary }) {
+  if (!film.imdbUrl && !film.tmdbUrl) return <span className="text-ink-2">—</span>;
+  const link = 'rounded-sm text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink';
+  return (
+    <span className="flex gap-3 text-[13px]">
+      {film.imdbUrl && (
+        <a href={film.imdbUrl} target="_blank" rel="noopener noreferrer" className={link}>
+          IMDb<span className="sr-only"> page for {titleWithoutYear(film.title)} (opens in a new tab)</span>
+        </a>
+      )}
+      {film.tmdbUrl && (
+        <a href={film.tmdbUrl} target="_blank" rel="noopener noreferrer" className={link}>
+          TMDb<span className="sr-only"> page for {titleWithoutYear(film.title)} (opens in a new tab)</span>
+        </a>
+      )}
+    </span>
+  );
+}
+
+/** Table view: one row per film, built for comparing the three numbers down a column. */
+function ResultsTable({ films, selectedIds, onToggleCompare, onOpenDetail, sort }: ResultsProps & { sort: ExplorerState }) {
+  const full = selectedIds.length >= MAX_COMPARE;
+  const sortFor = (key: SortKey) =>
+    sort.sortBy === key ? (sort.sortOrder === 'asc' ? ('ascending' as const) : ('descending' as const)) : undefined;
+
+  return (
+    <div
+      className="relative overflow-x-auto rounded-panel bg-surface-1"
+      role="region"
+      aria-label="Films, scrollable table"
+      tabIndex={0}
+    >
+      <table className="w-full min-w-[780px] text-left text-sm sm:min-w-[880px]">
+        <thead className="border-b border-line text-[13px] text-ink-2">
+          <tr>
+            <th scope="col" className="w-11 py-3 pl-4 pr-1 font-medium">
+              <span className="sr-only">Compare</span>
+            </th>
+            <th scope="col" aria-sort={sortFor('title')} className="px-3 py-3 font-medium">
+              Film
+            </th>
+            <th scope="col" aria-sort={sortFor('year')} className="px-3 py-3 font-medium">
+              Year
+            </th>
+            <th scope="col" aria-sort={sortFor('avgRating')} className="px-3 py-3 text-right font-medium">
+              Average rating
+            </th>
+            <th scope="col" aria-sort={sortFor('ratingCount')} className="px-3 py-3 text-right font-medium">
+              Rating count
+            </th>
+            <th scope="col" aria-sort={sortFor('weightedRating')} className="px-3 py-3 text-right font-medium">
+              Adjusted score <span className="font-normal">(Bayesian)</span>
+            </th>
+            <th scope="col" className="px-3 py-3 font-medium">
+              Links
+            </th>
+            <th scope="col" className="py-3 pl-3 pr-4 font-medium">
+              <span className="sr-only">Details</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-line">
+          {films.map((film) => {
+            const selected = selectedIds.includes(film.movieId);
+            return (
+              <tr
+                key={film.movieId}
+                className={clsx('transition-colors duration-150', selected ? 'bg-accent/[0.08]' : 'hover:bg-surface-2/60')}
+              >
+                <td className={clsx('py-3 pl-4 pr-1', selected && 'shadow-[inset_3px_0_0_var(--cm-accent)]')}>
+                  <CompareCheckbox film={film} checked={selected} full={full} onToggle={onToggleCompare} />
+                </td>
+                <th scope="row" className="max-w-[13rem] px-3 py-3 font-normal sm:max-w-[22rem]">
+                  <button
+                    type="button"
+                    onClick={() => onOpenDetail(film.movieId)}
+                    className="rounded-sm text-left text-[15px] font-semibold text-ink underline-offset-4 hover:text-accent hover:underline"
+                  >
+                    {titleWithoutYear(film.title)}
+                  </button>
+                  <span className="mt-0.5 block truncate text-[13px] text-ink-2">
+                    {film.genreList.length > 0 ? film.genreList.join(', ') : 'No genres listed'}
+                  </span>
+                </th>
+                <td className="px-3 py-3 text-ink-2 tabular-nums">{film.year ?? '—'}</td>
+                <td className="px-3 py-3 text-right text-ink tabular-nums">{formatScore(film.avgRating)}</td>
+                <td className="px-3 py-3 text-right text-ink tabular-nums">{formatCount(film.ratingCount)}</td>
+                <td className="px-3 py-3 text-right font-semibold text-accent tabular-nums">
+                  {formatScore(film.weightedRating)}
+                </td>
+                <td className="px-3 py-3">
+                  <ExternalLinks film={film} />
+                </td>
+                <td className="py-3 pl-3 pr-4 text-right">
+                  <button
+                    type="button"
+                    onClick={() => onOpenDetail(film.movieId)}
+                    className={buttonClass({ variant: 'secondary', size: 'sm' })}
+                  >
+                    Details<span className="sr-only"> for {titleWithoutYear(film.title)}</span>
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * One film in the grid: its poster, then the same three numbers the table shows.
+ * The title is the control that opens the film; its hit area also covers the
+ * poster, so the poster is clickable without being a second tab stop.
+ */
+function FilmCard({
+  film,
+  selected,
+  full,
+  onToggleCompare,
+  onOpenDetail
+}: {
+  film: MovieSummary;
+  selected: boolean;
+  full: boolean;
+  onToggleCompare: (film: MovieSummary) => void;
+  onOpenDetail: (id: number) => void;
+}) {
+  const { tiltRef, areaProps } = usePosterTilt();
+  return (
+    <li className="group relative flex min-w-0 flex-col" {...areaProps}>
+      <FilmPoster
+        film={{
+          movieId: film.movieId,
+          title: film.title,
+          year: film.year,
+          genres: film.genreList,
+          avgRating: film.avgRating,
+          ratingCount: film.ratingCount,
+          adjusted: film.weightedRating
+        }}
+        tmdbId={film.tmdbId}
+        tiltRef={tiltRef}
+        className={clsx('rounded-control', selected && 'outline-2 outline-offset-4 outline-accent')}
+      />
+      <button
+        type="button"
+        onClick={() => onOpenDetail(film.movieId)}
+        className="mt-3.5 rounded-sm text-left text-[15px] font-semibold leading-snug text-ink underline-offset-4 after:absolute after:inset-x-0 after:top-0 after:aspect-[2/3] hover:underline group-hover:text-accent"
+      >
+        <span className="line-clamp-2">{titleWithoutYear(film.title)}</span>
+      </button>
+      <p className="mb-3 mt-1 truncate text-[13px] text-ink-2">
+        {film.year ?? 'Year unknown'} · {film.genreList.length > 0 ? film.genreList.join(', ') : 'No genres listed'}
+      </p>
+      {/* Pushed to the foot of the card, so the figures line up across a row whatever the title length. */}
+      <dl className="mt-auto grid grid-cols-3 gap-x-2 border-t border-line pt-3">
+        <Metric
+          size="sm"
+          label={
+            <>
+              Average<span className="sr-only"> rating</span>
+            </>
+          }
+          value={formatScore(film.avgRating)}
+        />
+        <Metric size="sm" label="Ratings" value={formatCount(film.ratingCount)} />
+        <Metric
+          size="sm"
+          label={
+            <>
+              Adjusted<span className="sr-only"> score</span>
+            </>
+          }
+          value={formatScore(film.weightedRating)}
+          accent
+        />
+      </dl>
+      <div className="mt-3">
+        <CompareCheckbox film={film} checked={selected} full={full} onToggle={onToggleCompare} withLabel />
+      </div>
+    </li>
+  );
+}
+
+/** Grid view: a wall of posters, built for browsing. Every card carries the same three numbers. */
+function ResultsGrid({ films, selectedIds, onToggleCompare, onOpenDetail }: ResultsProps) {
+  const full = selectedIds.length >= MAX_COMPARE;
+  return (
+    <>
+      <p className="mb-5 max-w-[78ch] text-[13px] leading-relaxed text-ink-2">
+        Each poster is drawn from the film’s own numbers: one speck of light for every rating, a disc at the height of
+        its average, and an amber line at its adjusted score.
+        {TMDB_ENABLED && ` Where TMDB has a poster for the film, that is shown instead. ${TMDB_NOTICE}`}
+      </p>
+      <ul className="grid grid-cols-2 gap-x-4 gap-y-9 md:grid-cols-3 lg:grid-cols-4 lg:gap-x-6">
+        {films.map((film) => (
+          <FilmCard
+            key={film.movieId}
+            film={film}
+            selected={selectedIds.includes(film.movieId)}
+            full={full}
+            onToggleCompare={onToggleCompare}
+            onOpenDetail={onOpenDetail}
+          />
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function Pagination({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (page: number) => void }) {
+  if (totalPages <= 1) return null;
+  const step = buttonClass({ variant: 'secondary', size: 'sm' });
+  return (
+    <nav aria-label="Result pages" className="flex flex-wrap items-center justify-between gap-4">
+      <p className="text-sm text-ink-2 tabular-nums">
+        Page <span className="font-semibold text-ink">{formatCount(page)}</span> of {formatCount(totalPages)}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className={step} disabled={page <= 1} onClick={() => onPage(1)}>
+          First
+        </button>
+        <button type="button" className={step} disabled={page <= 1} onClick={() => onPage(page - 1)}>
+          <ChevronLeft className="size-4" aria-hidden="true" />
+          Previous
+        </button>
+        <button type="button" className={step} disabled={page >= totalPages} onClick={() => onPage(page + 1)}>
+          Next
+          <ChevronRight className="size-4" aria-hidden="true" />
+        </button>
+        <button type="button" className={step} disabled={page >= totalPages} onClick={() => onPage(totalPages)}>
+          Last
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+/** Stays at the bottom of the window while films are selected, so Compare is always within reach. */
+function CompareTray({
+  selected,
+  onRemove,
+  onClear,
+  onCompare
+}: {
+  selected: Selection[];
+  onRemove: (id: number) => void;
+  onClear: () => void;
+  onCompare: () => void;
+}) {
+  if (selected.length === 0) return null;
+  const hint =
+    selected.length < 2
+      ? 'Select at least 2 films to compare.'
+      : selected.length >= MAX_COMPARE
+        ? COMPARE_FULL
+        : null;
+
+  return (
+    <section
+      aria-label="Films selected for comparison"
+      className="sticky bottom-0 z-10 -mx-4 border-t border-line-strong bg-surface-2 px-4 py-3 sm:-mx-6 sm:px-6 lg:mx-0 lg:rounded-t-panel lg:border-x"
+    >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <p className="text-sm font-semibold text-ink tabular-nums">
+          Compare: {selected.length} of {MAX_COMPARE}
+        </p>
+        <ul className="flex min-w-0 flex-1 flex-wrap gap-2">
+          {selected.map((film) => (
+            <li
+              key={film.id}
+              className="inline-flex max-w-full items-center gap-1 rounded-control bg-canvas py-1 pl-2.5 pr-1 text-[13px] text-ink"
+            >
+              <span className="truncate">{film.title}</span>
+              <button
+                type="button"
+                onClick={() => onRemove(film.id)}
+                aria-label={`Remove ${film.title} from the comparison`}
+                className="flex size-5 shrink-0 items-center justify-center rounded-sm text-ink-2 hover:bg-surface-2 hover:text-ink"
+              >
+                <X className="size-3.5" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onClear} className={buttonClass({ variant: 'quiet' })}>
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={onCompare}
+            disabled={selected.length < 2}
+            aria-describedby={hint ? 'compare-hint' : undefined}
+            className={buttonClass({ variant: 'primary' })}
+          >
+            Compare films
+          </button>
+        </div>
+      </div>
+      {hint && (
+        <p id="compare-hint" role="status" className="mt-2 text-[13px] text-ink-2">
+          {hint}
+        </p>
+      )}
+    </section>
+  );
+}
 
 export default function MovieExplorerPage() {
-  const [moviesData, setMoviesData] = useState<PaginatedMovies | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // The URL is the single source of truth for every filter, the sort, the page and the view.
+  const state = useMemo(() => parseExplorerParams(searchParams), [searchParams]);
+  const dataKey = useMemo(() => toSearchParams({ ...state, view: 'table' }).toString(), [state]);
 
-  // Search, Genre, Year & Threshold State
-  const [search, setSearch] = useState('');
-  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
-  const [genreMode, setGenreMode] = useState<'and' | 'or'>('or');
-  const [minRating, setMinRating] = useState<number | ''>('');
-  const [minCount, setMinCount] = useState<number | ''>(5);
-  const [minYear, setMinYear] = useState<number | ''>('');
-  const [maxYear, setMaxYear] = useState<number | ''>('');
-  const [sortBy, setSortBy] = useState<'avgRating' | 'weightedRating' | 'ratingCount' | 'title' | 'year'>('weightedRating');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [page, setPage] = useState(1);
-  const pageSize = 16;
+  const movies = useQuery(`movies?${dataKey}`, (signal) => api.getMovies(toApiQuery(state), signal));
+  const genres = useQuery('genres', () => api.getGenres());
 
-  // View Mode: Table vs Grid Cards
-  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+  // Text and number fields are drafts until submitted. When the URL changes (Back, a chip, Reset), they follow it.
+  const applied = draftFrom(state);
+  const appliedKey = JSON.stringify(applied);
+  const [draft, setDraft] = useState(applied);
+  const [syncedKey, setSyncedKey] = useState(appliedKey);
+  if (syncedKey !== appliedKey) {
+    setSyncedKey(appliedKey);
+    setDraft(applied);
+  }
 
-  // Comparison State (2 to 4 movies)
-  const [selectedForCompare, setSelectedForCompare] = useState<number[]>([]);
-  const [comparisonModalOpen, setComparisonModalOpen] = useState(false);
-  const [comparisonData, setComparisonData] = useState<MovieComparisonResponse | null>(null);
-  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [selected, setSelected] = useState<Selection[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const searchId = useId();
+  const filtersId = useId();
 
-  // Detail Drawer State
-  const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
-  const [movieDetail, setMovieDetail] = useState<MovieDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
+  /**
+   * Apply a change to the URL. Anything except a page or view change returns to page 1.
+   * Each change builds on the address bar as it is at that moment, not on the last
+   * render, so two changes in quick succession can't overwrite each other.
+   */
+  const update = (change: Partial<ExplorerState> | ((current: ExplorerState) => Partial<ExplorerState>)) => {
+    const current = readUrl();
+    const patch = typeof change === 'function' ? change(current) : change;
+    const next = { ...current, ...patch };
+    const keepsPage = 'page' in patch || (Object.keys(patch).length === 1 && 'view' in patch);
+    if (!keepsPage) next.page = 1;
+    setSearchParams(toSearchParams(next));
+  };
 
-  // Available Genres
-  const [allGenres, setAllGenres] = useState<string[]>([]);
-  const [showGenrePicker, setShowGenrePicker] = useState(false);
-
-  // Abort controller reference for stale-request protection
-  const abortControllerRef = useRef<AbortController | null>(null);
-
+  // The API clamps a page number past the end. Keep the URL in step with the page actually shown.
+  const shownPage = movies.status === 'ready' ? movies.data.page : null;
   useEffect(() => {
-    api.getGenres()
-      .then(res => setAllGenres(res.map(g => g.genre)))
-      .catch(err => console.error("Could not fetch genres:", err));
-  }, []);
-
-  const fetchMovies = (targetPage: number = page) => {
-    // Abort previous in-flight request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
+    if (shownPage !== null && shownPage !== state.page) {
+      setSearchParams(toSearchParams({ ...state, page: shownPage }), { replace: true });
     }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+  }, [shownPage, state, setSearchParams]);
 
-    setLoading(true);
-    setError(null);
+  const minYear = toNumber(draft.minYear);
+  const maxYear = toNumber(draft.maxYear);
+  const yearsReversed = minYear !== null && maxYear !== null && minYear > maxYear;
+  const hasUnappliedChanges = JSON.stringify(draft) !== appliedKey;
 
-    api.getMovies({
-      page: targetPage,
-      pageSize,
-      search: search.trim() || undefined,
-      genres: selectedGenres.length > 0 ? selectedGenres.join(',') : undefined,
-      genreMode,
-      minRating: minRating !== '' ? Number(minRating) : undefined,
-      minCount: minCount !== '' ? Number(minCount) : undefined,
-      minYear: minYear !== '' ? Number(minYear) : undefined,
-      maxYear: maxYear !== '' ? Number(maxYear) : undefined,
-      sortBy,
-      sortOrder
-    }, controller.signal)
-      .then((res) => {
-        setMoviesData(res);
-        setPage(res.page);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (err.name === 'AbortError') return;
-        setError(err?.message || 'Failed to fetch movies');
-        setLoading(false);
-      });
-  };
-
-  // Re-fetch when sorting, genre, or page changes
-  useEffect(() => {
-    fetchMovies(page);
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, [page, sortBy, sortOrder, selectedGenres, genreMode]);
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPage(1);
-    fetchMovies(1);
-  };
-
-  const handleResetFilters = () => {
-    setSearch('');
-    setSelectedGenres([]);
-    setGenreMode('or');
-    setMinRating('');
-    setMinCount(5);
-    setMinYear('');
-    setMaxYear('');
-    setSortBy('weightedRating');
-    setSortOrder('desc');
-    setPage(1);
-    // Directly fetch with clean params
-    setTimeout(() => {
-      fetchMovies(1);
-    }, 0);
-  };
-
-  const toggleGenre = (genre: string) => {
-    setPage(1);
-    setSelectedGenres(prev =>
-      prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]
-    );
-  };
-
-  const toggleCompareMovie = (movieId: number) => {
-    setSelectedForCompare(prev => {
-      if (prev.includes(movieId)) {
-        return prev.filter(id => id !== movieId);
-      }
-      if (prev.length >= 4) {
-        alert('You can compare a maximum of 4 movies at a time.');
-        return prev;
-      }
-      return [...prev, movieId];
+  const applyDraft = (event: FormEvent) => {
+    event.preventDefault();
+    if (yearsReversed) return;
+    update({
+      search: draft.search.trim(),
+      minRating: toNumber(draft.minRating),
+      minCount: Math.max(0, Math.trunc(toNumber(draft.minCount) ?? 0)),
+      minYear,
+      maxYear
     });
   };
 
-  const openComparisonModal = () => {
-    if (selectedForCompare.length < 2) return;
-    setComparisonLoading(true);
-    setComparisonModalOpen(true);
-    api.compareMovies(selectedForCompare)
-      .then(res => {
-        setComparisonData(res);
-        setComparisonLoading(false);
-      })
-      .catch(err => {
-        alert(err.message || 'Comparison failed');
-        setComparisonLoading(false);
-      });
+  const resetFilters = () => setSearchParams(toSearchParams({ ...DEFAULT_STATE, view: readUrl().view }));
+
+  const toggleGenre = (genre: string) =>
+    update((current) => ({
+      genres: current.genres.includes(genre)
+        ? current.genres.filter((other) => other !== genre)
+        : [...current.genres, genre]
+    }));
+
+  const changeSort = (key: SortKey) =>
+    update((current) =>
+      current.sortBy === key
+        ? { sortOrder: current.sortOrder === 'desc' ? 'asc' : 'desc' }
+        : { sortBy: key, sortOrder: defaultOrderFor(key) }
+    );
+
+  const changePage = (page: number) => {
+    update({ page });
+    resultsRef.current?.scrollIntoView({ block: 'start' });
   };
 
-  const openMovieDetail = (movieId: number) => {
-    setSelectedMovieId(movieId);
-    setDetailLoading(true);
-    api.getMovie(movieId)
-      .then(res => {
-        setMovieDetail(res);
-        setDetailLoading(false);
-      })
-      .catch(err => {
-        console.error('Failed to load movie detail:', err);
-        setDetailLoading(false);
-      });
-  };
+  const toggleCompare = (film: MovieSummary) =>
+    setSelected((current) => {
+      if (current.some((item) => item.id === film.movieId)) return current.filter((item) => item.id !== film.movieId);
+      if (current.length >= MAX_COMPARE) return current;
+      return [...current, { id: film.movieId, title: titleWithoutYear(film.title) }];
+    });
 
-  const movieList = moviesData?.movies || (moviesData as any)?.items || [];
-  const totalMovies = moviesData?.total ?? 0;
-  const totalPages = moviesData?.totalPages ?? 1;
+  const chips = activeFilterChips(state);
+  const selectedIds = selected.map((film) => film.id);
+  const films = movies.status === 'ready' ? movies.data.movies : [];
+  const total = movies.status === 'ready' ? movies.data.total : null;
+  const failure = movies.status === 'error' ? describeError(movies.error, 'films') : null;
 
-  // Active filters list for chips
-  const activeFilters = [];
-  if (search.trim()) activeFilters.push({ label: `Search: "${search}"`, clear: () => { setSearch(''); setPage(1); setTimeout(() => fetchMovies(1), 0); } });
-  selectedGenres.forEach(g => {
-    activeFilters.push({ label: `Genre: ${g}`, clear: () => toggleGenre(g) });
-  });
-  if (minRating !== '') activeFilters.push({ label: `Min Rating: ${minRating}★`, clear: () => { setMinRating(''); setPage(1); setTimeout(() => fetchMovies(1), 0); } });
-  if (minCount !== '' && minCount !== 5) activeFilters.push({ label: `Min Votes: ${minCount}`, clear: () => { setMinCount(5); setPage(1); setTimeout(() => fetchMovies(1), 0); } });
-  if (minYear !== '') activeFilters.push({ label: `Year ≥ ${minYear}`, clear: () => { setMinYear(''); setPage(1); setTimeout(() => fetchMovies(1), 0); } });
-  if (maxYear !== '') activeFilters.push({ label: `Year ≤ ${maxYear}`, clear: () => { setMaxYear(''); setPage(1); setTimeout(() => fetchMovies(1), 0); } });
+  // A failed request has no count. It must never read as "0 films".
+  let summary = '';
+  if (movies.status === 'loading') summary = 'Loading films…';
+  else if (total === 0) summary = 'No films match';
+  else if (total !== null) {
+    const first = (state.page - 1) * PAGE_SIZE + 1;
+    summary = `Showing ${formatCount(first)}–${formatCount(first + films.length - 1)} of ${formatCount(total)} films`;
+  }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto animate-fade-in pb-16">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#282A30]">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F4F4F5]">
-              Movie Intelligence Explorer
-            </h1>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#F4B860]/10 text-[#F4B860] border border-[#F4B860]/30 font-mono font-medium">
-              {totalMovies.toLocaleString()} Titles
-            </span>
-          </div>
-          <p className="text-sm text-[#A1A1AA] mt-1">
-            Query, filter, and inspect ratings calculated across 100,836 reviews via Apache Hadoop MapReduce.
-          </p>
-        </div>
-
-        {/* View Switcher & Selection Counter */}
-        <div className="flex items-center gap-2">
-          {selectedForCompare.length > 0 && (
-            <button
-              onClick={openComparisonModal}
-              disabled={selectedForCompare.length < 2}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-standard ${
-                selectedForCompare.length >= 2
-                  ? 'bg-[#2DD4BF] text-[#101114] shadow-sm'
-                  : 'bg-[#282A30] text-[#A1A1AA] cursor-not-allowed'
-              }`}
-            >
-              <Columns2 className="w-3.5 h-3.5" />
-              <span>Compare ({selectedForCompare.length}/4)</span>
-            </button>
-          )}
-
-          <div className="flex items-center rounded-lg bg-[#191B20] border border-[#282A30] p-0.5">
-            <button
-              onClick={() => setViewMode('table')}
-              className={`p-1.5 rounded-md text-xs font-medium transition-standard ${
-                viewMode === 'table' ? 'bg-[#282A30] text-[#F4F4F5]' : 'text-[#A1A1AA] hover:text-[#F4F4F5]'
-              }`}
-              title="Table view"
-              aria-label="Table view"
-            >
-              <List className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-md text-xs font-medium transition-standard ${
-                viewMode === 'grid' ? 'bg-[#282A30] text-[#F4F4F5]' : 'text-[#A1A1AA] hover:text-[#F4F4F5]'
-              }`}
-              title="Card grid view"
-              aria-label="Card grid view"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter Toolbar */}
-      <div className="rounded-xl bg-[#191B20] border border-[#282A30] p-4 shadow-sm space-y-4">
-        <form onSubmit={handleSearchSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3">
-          {/* Title Search */}
-          <div className="lg:col-span-4 relative">
-            <Search className="w-4 h-4 text-[#A1A1AA] absolute left-3 top-2.5" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search complete catalogue (e.g. Matrix, Shawshank)..."
-              className="w-full pl-9 pr-4 py-2 bg-[#14161B] border border-[#282A30] rounded-lg text-xs text-[#F4F4F5] placeholder-[#A1A1AA] focus:border-[#F4B860] transition-standard"
-            />
-          </div>
-
-          {/* Genre Multi-Select Pill */}
-          <div className="lg:col-span-3 relative">
-            <button
-              type="button"
-              onClick={() => setShowGenrePicker(!showGenrePicker)}
-              className="w-full px-3 py-2 bg-[#14161B] border border-[#282A30] hover:border-[#3A3D46] rounded-lg text-xs text-left flex items-center justify-between text-[#F4F4F5] transition-standard"
-            >
-              <span className="truncate">
-                {selectedGenres.length === 0
-                  ? 'All Genres (Any)'
-                  : `${selectedGenres.length} Genre${selectedGenres.length > 1 ? 's' : ''} (${genreMode.toUpperCase()})`}
-              </span>
-              <SlidersHorizontal className="w-3.5 h-3.5 text-[#A1A1AA]" />
-            </button>
-
-            {/* Genre Flyout Picker */}
-            {showGenrePicker && (
-              <div
-                className="absolute left-0 top-11 w-72 rounded-xl bg-[#191B20] border border-[#3A3D46] shadow-2xl p-3 z-40 text-xs animate-fade-in space-y-2"
-                onMouseLeave={() => setShowGenrePicker(false)}
-              >
-                <div className="flex items-center justify-between border-b border-[#282A30] pb-2">
-                  <span className="font-semibold text-[#F4F4F5]">Filter by Genre</span>
-                  <div className="flex items-center gap-1 bg-[#14161B] rounded p-0.5 border border-[#282A30]">
-                    <button
-                      type="button"
-                      onClick={() => setGenreMode('or')}
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${genreMode === 'or' ? 'bg-[#F4B860] text-[#101114] font-bold' : 'text-[#A1A1AA]'}`}
-                    >
-                      OR
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGenreMode('and')}
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${genreMode === 'and' ? 'bg-[#F4B860] text-[#101114] font-bold' : 'text-[#A1A1AA]'}`}
-                    >
-                      AND
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-1">
-                  {allGenres.map(g => (
-                    <label
-                      key={g}
-                      className="flex items-center gap-2 px-2 py-1 rounded hover:bg-[#21242B] cursor-pointer text-[11px] text-[#D4D4D8]"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedGenres.includes(g)}
-                        onChange={() => toggleGenre(g)}
-                        className="rounded border-[#282A30] text-[#F4B860] focus:ring-0"
-                      />
-                      <span className="truncate">{g}</span>
-                    </label>
-                  ))}
-                </div>
-
-                {selectedGenres.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedGenres([])}
-                    className="w-full mt-2 py-1 text-center text-[10px] text-[#A1A1AA] hover:text-[#F4F4F5] border-t border-[#282A30]"
-                  >
-                    Clear Genre Selection
-                  </button>
+    <div className="space-y-6">
+      <PageHeader
+        title="Movies"
+        description="Search, filter and compare every film in the dataset. The adjusted score is a Bayesian average: it weighs a film’s average rating by how many people rated it."
+        actions={
+          <div role="group" aria-label="View" className="flex gap-1">
+            {(
+              [
+                { view: 'table', label: 'Table', icon: List },
+                { view: 'grid', label: 'Grid', icon: LayoutGrid }
+              ] as const
+            ).map(({ view, label, icon: Icon }) => (
+              <button
+                key={view}
+                type="button"
+                aria-pressed={state.view === view}
+                onClick={() => update({ view })}
+                className={clsx(
+                  'inline-flex h-9 items-center gap-2 rounded-control px-3 text-sm font-medium transition-colors duration-150',
+                  state.view === view ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink'
                 )}
-              </div>
-            )}
-          </div>
-
-          {/* Min Rating Threshold */}
-          <div className="lg:col-span-1">
-            <input
-              type="number"
-              step="0.5"
-              min="0"
-              max="5"
-              value={minRating}
-              onChange={(e) => setMinRating(e.target.value === '' ? '' : Number(e.target.value))}
-              placeholder="Min ★"
-              className="w-full px-2.5 py-2 bg-[#14161B] border border-[#282A30] rounded-lg text-xs text-[#F4F4F5] placeholder-[#A1A1AA] focus:border-[#F4B860]"
-              title="Minimum average rating"
-            />
-          </div>
-
-          {/* Min Vote Count */}
-          <div className="lg:col-span-1">
-            <input
-              type="number"
-              min="0"
-              value={minCount}
-              onChange={(e) => setMinCount(e.target.value === '' ? '' : Number(e.target.value))}
-              placeholder="Min Votes"
-              className="w-full px-2.5 py-2 bg-[#14161B] border border-[#282A30] rounded-lg text-xs text-[#F4F4F5] placeholder-[#A1A1AA] focus:border-[#F4B860]"
-              title="Minimum rating count threshold"
-            />
-          </div>
-
-          {/* Year Range */}
-          <div className="lg:col-span-1">
-            <input
-              type="number"
-              min="1900"
-              max="2025"
-              value={minYear}
-              onChange={(e) => setMinYear(e.target.value === '' ? '' : Number(e.target.value))}
-              placeholder="Yr From"
-              className="w-full px-2 py-2 bg-[#14161B] border border-[#282A30] rounded-lg text-xs text-[#F4F4F5] placeholder-[#A1A1AA] focus:border-[#F4B860]"
-              title="Minimum release year"
-            />
-          </div>
-
-          <div className="lg:col-span-1">
-            <input
-              type="number"
-              min="1900"
-              max="2025"
-              value={maxYear}
-              onChange={(e) => setMaxYear(e.target.value === '' ? '' : Number(e.target.value))}
-              placeholder="Yr To"
-              className="w-full px-2 py-2 bg-[#14161B] border border-[#282A30] rounded-lg text-xs text-[#F4F4F5] placeholder-[#A1A1AA] focus:border-[#F4B860]"
-              title="Maximum release year"
-            />
-          </div>
-
-          {/* Search Button & Reset */}
-          <div className="lg:col-span-1 flex items-center gap-1.5">
-            <button
-              type="submit"
-              className="flex-1 py-2 bg-[#F4B860] hover:bg-[#F6C47B] text-[#101114] rounded-lg text-xs font-semibold transition-standard flex items-center justify-center gap-1 shadow-sm"
-              title="Apply search"
-            >
-              <Filter className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={handleResetFilters}
-              className="p-2 bg-[#14161B] hover:bg-[#21242B] text-[#A1A1AA] hover:text-[#F4F4F5] border border-[#282A30] rounded-lg text-xs transition-standard"
-              title="Reset all filters"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </form>
-
-        {/* Active Filter Chips */}
-        {activeFilters.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#282A30] text-xs">
-            <span className="text-[#A1A1AA] text-[11px] mr-1">Active filters:</span>
-            {activeFilters.map((af, idx) => (
-              <span
-                key={idx}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#14161B] border border-[#282A30] text-[#F4F4F5] text-[11px]"
               >
-                <span>{af.label}</span>
+                <Icon className="size-4" aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+        }
+      />
+
+      <form onSubmit={applyDraft} role="search" aria-label="Films" className="lit-panel rounded-panel bg-surface-1 p-4 sm:p-5">
+        <div className="flex gap-2">
+          <div className="relative min-w-0 flex-1">
+            <label htmlFor={searchId} className="sr-only">
+              Search films by title
+            </label>
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-ink-2" aria-hidden="true" />
+            <input
+              id={searchId}
+              type="search"
+              name="search"
+              value={draft.search}
+              onChange={(event) => setDraft({ ...draft, search: event.target.value })}
+              placeholder="Search by title, e.g. Matrix"
+              autoComplete="off"
+              spellCheck={false}
+              enterKeyHint="search"
+              className="h-12 w-full rounded-control border border-line-strong bg-canvas pl-11 pr-3 text-base text-ink placeholder:text-ink-2 transition-colors duration-150 hover:border-ink-2"
+            />
+          </div>
+          <button type="submit" className={buttonClass({ variant: 'primary', size: 'lg' })}>
+            Search
+          </button>
+        </div>
+
+        <button
+          type="button"
+          aria-expanded={filtersOpen}
+          aria-controls={filtersId}
+          onClick={() => setFiltersOpen((open) => !open)}
+          className={buttonClass({ variant: 'secondary', className: 'mt-3 lg:hidden' })}
+        >
+          <SlidersHorizontal className="size-4" aria-hidden="true" />
+          {filtersOpen ? 'Hide filters' : 'Show filters'}
+          {chips.length > 0 && <span className="font-normal text-ink-2 tabular-nums">({chips.length} active)</span>}
+        </button>
+
+        <div
+          id={filtersId}
+          className={clsx(
+            'mt-4 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid lg:grid-cols-[minmax(0,1.5fr)_repeat(4,minmax(0,1fr))_auto] lg:items-end',
+            filtersOpen ? 'grid' : 'hidden'
+          )}
+        >
+          <div className="col-span-2 sm:col-span-1">
+            <GenrePicker
+              options={genres.status === 'ready' ? genres.data.map((genre) => genre.genre) : null}
+              failed={genres.status === 'error'}
+              onRetry={genres.retry}
+              selected={state.genres}
+              mode={state.genreMode}
+              onToggle={toggleGenre}
+              onModeChange={(genreMode) => update({ genreMode })}
+              onClear={() => update({ genres: [] })}
+            />
+          </div>
+          <div>
+            <label htmlFor={`${filtersId}-rating`} className={FIELD_LABEL}>
+              Min. average rating
+            </label>
+            <input
+              id={`${filtersId}-rating`}
+              type="number"
+              name="minRating"
+              min={0}
+              max={5}
+              step={0.5}
+              inputMode="decimal"
+              value={draft.minRating}
+              onChange={(event) => setDraft({ ...draft, minRating: event.target.value })}
+              placeholder="0 to 5"
+              className={FIELD}
+            />
+          </div>
+          <div>
+            <label htmlFor={`${filtersId}-count`} className={FIELD_LABEL}>
+              Min. rating count
+            </label>
+            <input
+              id={`${filtersId}-count`}
+              type="number"
+              name="minCount"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              value={draft.minCount}
+              onChange={(event) => setDraft({ ...draft, minCount: event.target.value })}
+              placeholder="Any"
+              className={FIELD}
+            />
+          </div>
+          <div>
+            <label htmlFor={`${filtersId}-from`} className={FIELD_LABEL}>
+              Released from
+            </label>
+            <input
+              id={`${filtersId}-from`}
+              type="number"
+              name="minYear"
+              min={1800}
+              max={2100}
+              step={1}
+              inputMode="numeric"
+              value={draft.minYear}
+              onChange={(event) => setDraft({ ...draft, minYear: event.target.value })}
+              placeholder="Year"
+              aria-invalid={yearsReversed || undefined}
+              className={FIELD}
+            />
+          </div>
+          <div>
+            <label htmlFor={`${filtersId}-to`} className={FIELD_LABEL}>
+              Released up to
+            </label>
+            <input
+              id={`${filtersId}-to`}
+              type="number"
+              name="maxYear"
+              min={1800}
+              max={2100}
+              step={1}
+              inputMode="numeric"
+              value={draft.maxYear}
+              onChange={(event) => setDraft({ ...draft, maxYear: event.target.value })}
+              placeholder="Year"
+              aria-invalid={yearsReversed || undefined}
+              className={FIELD}
+            />
+          </div>
+          <div className="col-span-2 flex items-center gap-2 sm:col-span-3 lg:col-span-1">
+            <button type="submit" className={buttonClass({ variant: 'secondary' })}>
+              Apply
+            </button>
+            <button type="button" onClick={resetFilters} className={buttonClass({ variant: 'quiet' })}>
+              <RotateCcw className="size-4" aria-hidden="true" />
+              Reset
+            </button>
+          </div>
+        </div>
+
+        {yearsReversed ? (
+          <p role="alert" className="mt-3 text-sm text-danger">
+            “Released from” can’t be later than “Released up to”.
+          </p>
+        ) : (
+          hasUnappliedChanges && (
+            <p role="status" className="mt-3 text-[13px] text-ink-2">
+              You have changes that aren’t applied yet. Press Search or Apply.
+            </p>
+          )
+        )}
+      </form>
+
+      {chips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span id={`${filtersId}-chips`} className="text-[13px] text-ink-2">
+            Active filters:
+          </span>
+          <ul aria-labelledby={`${filtersId}-chips`} className="contents">
+            {chips.map((chip) => (
+              <li
+                key={chip.id}
+                className="inline-flex items-center gap-1 rounded-control bg-accent/15 py-1 pl-2.5 pr-1 text-[13px] font-medium text-ink"
+              >
+                {chip.label}
                 <button
                   type="button"
-                  onClick={af.clear}
-                  className="hover:text-[#F4B860] ml-0.5"
-                  aria-label={`Remove filter ${af.label}`}
+                  onClick={() => update(chip.clear)}
+                  aria-label={`Remove filter: ${chip.label}`}
+                  className="flex size-5 items-center justify-center rounded-sm text-ink-2 hover:bg-canvas/50 hover:text-ink"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="size-3.5" aria-hidden="true" />
                 </button>
-              </span>
+              </li>
             ))}
-            <button
-              type="button"
-              onClick={handleResetFilters}
-              className="text-[11px] text-[#F4B860] hover:underline ml-2"
-            >
-              Clear All
-            </button>
-          </div>
-        )}
+          </ul>
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="ml-1 rounded-sm text-[13px] font-semibold text-accent underline-offset-4 hover:underline"
+          >
+            Reset all
+          </button>
+        </div>
+      )}
 
-        {/* Sorting Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#282A30] text-xs">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[#A1A1AA] text-[11px] font-medium flex items-center gap-1">
-              <ArrowUpDown className="w-3 h-3" /> Sort by:
-            </span>
-
-            {[
-              { id: 'weightedRating', label: 'Bayesian Score' },
-              { id: 'ratingCount', label: 'Rating Count' },
-              { id: 'avgRating', label: 'Audience Mean' },
-              { id: 'title', label: 'Title (A-Z)' },
-              { id: 'year', label: 'Release Year' }
-            ].map(item => {
-              const active = sortBy === item.id;
+      <div ref={resultsRef} className="scroll-mt-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <div role="group" aria-label="Sort films" className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[13px] text-ink-2">Sort by</span>
+            {SORT_OPTIONS.map((option) => {
+              const active = state.sortBy === option.key;
+              const Arrow = state.sortOrder === 'desc' ? ArrowDown : ArrowUp;
               return (
                 <button
-                  key={item.id}
-                  onClick={() => {
-                    if (active) {
-                      setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc');
-                    } else {
-                      setSortBy(item.id as any);
-                      setSortOrder(item.id === 'title' ? 'asc' : 'desc');
-                    }
-                    setPage(1);
-                  }}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-standard ${
-                    active
-                      ? 'bg-[#F4B860]/10 text-[#F4B860] border border-[#F4B860]/40 font-semibold'
-                      : 'text-[#A1A1AA] hover:text-[#F4F4F5] bg-[#14161B] border border-[#282A30]'
-                  }`}
+                  key={option.key}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => changeSort(option.key)}
+                  className={clsx(
+                    'inline-flex h-8 items-center gap-1 rounded-control px-2.5 text-[13px] font-medium transition-colors duration-150',
+                    active ? 'bg-accent/15 text-accent' : 'text-ink-2 hover:bg-surface-2 hover:text-ink'
+                  )}
                 >
-                  {item.label} {active && (sortOrder === 'desc' ? '↓' : '↑')}
+                  {option.label}
+                  {active && (
+                    <>
+                      <Arrow className="size-3.5" aria-hidden="true" />
+                      <span className="sr-only">, {state.sortOrder === 'desc' ? 'descending' : 'ascending'}</span>
+                    </>
+                  )}
                 </button>
               );
             })}
           </div>
-
-          <div className="text-[11px] text-[#A1A1AA] font-mono">
-            Showing {movieList.length > 0 ? (page - 1) * pageSize + 1 : 0}–
-            {Math.min(page * pageSize, totalMovies)} of {totalMovies.toLocaleString()}
-          </div>
+          <p role="status" className="text-sm text-ink-2 tabular-nums">
+            {summary}
+          </p>
         </div>
+
+        {movies.status === 'loading' && (
+          <div className="min-h-[24rem] rounded-panel bg-surface-1">
+            <LoadingSpinner text="Loading films…" />
+          </div>
+        )}
+        {failure && <ErrorState title={failure.title} message={failure.message} onRetry={movies.retry} />}
+        {movies.status === 'ready' && films.length === 0 && (
+          <EmptyState
+            title="No films match these filters"
+            message="Try a shorter search, fewer genres, or a lower minimum."
+            action={
+              <button type="button" onClick={resetFilters} className={buttonClass({ variant: 'secondary' })}>
+                <RotateCcw className="size-4" aria-hidden="true" />
+                Reset filters
+              </button>
+            }
+          />
+        )}
+        {films.length > 0 &&
+          (state.view === 'table' ? (
+            <>
+              <ResultsTable
+                films={films}
+                selectedIds={selectedIds}
+                onToggleCompare={toggleCompare}
+                onOpenDetail={setDetailId}
+                sort={state}
+              />
+              <p className="text-[13px] text-ink-2 lg:hidden">
+                Scroll the table sideways for every column, or switch to Grid.
+              </p>
+            </>
+          ) : (
+            <ResultsGrid films={films} selectedIds={selectedIds} onToggleCompare={toggleCompare} onOpenDetail={setDetailId} />
+          ))}
+
+        {movies.status === 'ready' && (
+          <Pagination page={state.page} totalPages={movies.data.totalPages} onPage={changePage} />
+        )}
       </div>
 
-      {/* Main Content: Movies List or Loading/Error */}
-      {loading ? (
-        <LoadingSpinner text="Retrieving matching movies from MapReduce index..." />
-      ) : error ? (
-        <ErrorState message={error} onRetry={() => fetchMovies(page)} />
-      ) : movieList.length === 0 ? (
-        <EmptyState />
-      ) : viewMode === 'table' ? (
-        /* Table View */
-        <div className="rounded-xl bg-[#191B20] border border-[#282A30] overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-[#14161B] text-[#A1A1AA] font-medium border-b border-[#282A30]">
-                <tr>
-                  <th className="py-3 px-3 w-10 text-center">
-                    <span className="sr-only">Select</span>
-                  </th>
-                  <th className="py-3 px-4">Title & Release Year</th>
-                  <th className="py-3 px-4">Genres</th>
-                  <th className="py-3 px-3 text-right">Rating Volume</th>
-                  <th className="py-3 px-3 text-right">Audience Mean</th>
-                  <th className="py-3 px-3 text-right">Bayesian (WR)</th>
-                  <th className="py-3 px-4 text-center">External</th>
-                  <th className="py-3 px-4 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#282A30]/60">
-                {movieList.map((movie: MovieSummary) => {
-                  const isSelected = selectedForCompare.includes(movie.movieId);
-                  return (
-                    <tr
-                      key={movie.movieId}
-                      className={`hover:bg-[#21242B] transition-standard ${
-                        isSelected ? 'bg-[#F4B860]/5' : ''
-                      }`}
-                    >
-                      <td className="py-2.5 px-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => toggleCompareMovie(movie.movieId)}
-                          className="text-[#A1A1AA] hover:text-[#F4B860] transition-colors"
-                          title={isSelected ? 'Remove from compare' : 'Add to compare'}
-                        >
-                          {isSelected ? (
-                            <CheckSquare className="w-4 h-4 text-[#F4B860]" />
-                          ) : (
-                            <Square className="w-4 h-4" />
-                          )}
-                        </button>
-                      </td>
-                      <td className="py-2.5 px-4 font-medium text-[#F4F4F5]">
-                        <button
-                          onClick={() => openMovieDetail(movie.movieId)}
-                          className="hover:text-[#F4B860] text-left transition-colors font-medium"
-                        >
-                          {movie.title}
-                        </button>
-                        {movie.year && (
-                          <span className="text-[11px] text-[#A1A1AA] ml-1.5 font-mono">
-                            ({movie.year})
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-4">
-                        <div className="flex flex-wrap gap-1 max-w-xs">
-                          {movie.genreList.slice(0, 3).map((g: string) => (
-                            <span
-                              key={g}
-                              className="text-[10px] px-1.5 py-0.5 rounded bg-[#14161B] text-[#D4D4D8] border border-[#282A30]"
-                            >
-                              {g}
-                            </span>
-                          ))}
-                          {movie.genreList.length > 3 && (
-                            <span className="text-[10px] text-[#A1A1AA]">
-                              +{movie.genreList.length - 3}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono font-bold text-[#F4F4F5] tabular-nums">
-                        {movie.ratingCount.toLocaleString()}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono text-[#F4B860] font-semibold tabular-nums">
-                        {movie.avgRating !== null ? `${movie.avgRating.toFixed(2)} ★` : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono text-[#2DD4BF] font-semibold tabular-nums">
-                        {movie.weightedRating !== null ? `${movie.weightedRating.toFixed(2)} ★` : '—'}
-                      </td>
-                      <td className="py-2.5 px-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          {movie.imdbUrl ? (
-                            <a
-                              href={movie.imdbUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#282A30] hover:bg-[#3A3D46] text-[#F4B860] transition-colors"
-                              title="View on IMDb"
-                            >
-                              IMDb
-                            </a>
-                          ) : (
-                            <span className="text-[10px] text-[#646A84]">—</span>
-                          )}
-                          {movie.tmdbUrl && (
-                            <a
-                              href={movie.tmdbUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#282A30] hover:bg-[#3A3D46] text-[#2DD4BF] transition-colors"
-                              title="View on TMDb"
-                            >
-                              TMDb
-                            </a>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-4 text-right">
-                        <button
-                          onClick={() => openMovieDetail(movie.movieId)}
-                          className="px-2.5 py-1 rounded bg-[#14161B] hover:bg-[#282A30] text-[#D4D4D8] hover:text-[#F4F4F5] border border-[#282A30] text-[11px] font-medium transition-standard"
-                        >
-                          Inspect
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        /* Card Grid View */
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {movieList.map((movie: MovieSummary) => {
-            const isSelected = selectedForCompare.includes(movie.movieId);
-            return (
-              <div
-                key={movie.movieId}
-                className={`rounded-xl bg-[#191B20] border p-4 flex flex-col justify-between transition-standard ${
-                  isSelected ? 'border-[#F4B860] bg-[#F4B860]/5' : 'border-[#282A30] hover:border-[#3A3D46]'
-                }`}
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#14161B] text-[#2DD4BF] border border-[#282A30]">
-                      Bayes {movie.weightedRating?.toFixed(2) ?? '—'} ★
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => toggleCompareMovie(movie.movieId)}
-                      className="text-[#A1A1AA] hover:text-[#F4B860]"
-                      title="Toggle comparison"
-                    >
-                      {isSelected ? (
-                        <CheckSquare className="w-4 h-4 text-[#F4B860]" />
-                      ) : (
-                        <Square className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
+      <CompareTray
+        selected={selected}
+        onRemove={(id) => setSelected((current) => current.filter((film) => film.id !== id))}
+        onClear={() => setSelected([])}
+        onCompare={() => setCompareOpen(true)}
+      />
 
-                  <h3
-                    onClick={() => openMovieDetail(movie.movieId)}
-                    className="text-xs font-semibold text-[#F4F4F5] hover:text-[#F4B860] cursor-pointer line-clamp-2 leading-tight"
-                    title={movie.title}
-                  >
-                    {movie.title}
-                  </h3>
-
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {movie.genreList.slice(0, 3).map((g: string) => (
-                      <span key={g} className="text-[10px] px-1.5 py-0.5 rounded bg-[#14161B] text-[#A1A1AA] border border-[#282A30]">
-                        {g}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-[#282A30] flex items-center justify-between text-xs">
-                  <div>
-                    <span className="text-[10px] text-[#A1A1AA] block">Volume</span>
-                    <span className="font-mono font-bold text-[#F4F4F5] tabular-nums">
-                      {movie.ratingCount.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[10px] text-[#A1A1AA] block">Mean</span>
-                    <span className="font-mono font-bold text-[#F4B860] tabular-nums">
-                      {movie.avgRating ? `${movie.avgRating.toFixed(2)} ★` : '—'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Pagination Controls */}
-      {totalPages > 1 && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-[#282A30]">
-          <div className="text-xs text-[#A1A1AA]">
-            Page <span className="font-semibold text-[#F4F4F5]">{page}</span> of{' '}
-            <span className="font-semibold text-[#F4F4F5]">{totalPages}</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page <= 1}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#191B20] border border-[#282A30] text-xs font-medium text-[#F4F4F5] hover:bg-[#21242B] disabled:opacity-40 disabled:cursor-not-allowed transition-standard"
-            >
-              <ChevronLeft className="w-4 h-4" /> Previous
-            </button>
-
-            {/* Quick jump to page 1 if far */}
-            {page > 3 && (
-              <button
-                onClick={() => setPage(1)}
-                className="px-2.5 py-1.5 rounded-lg bg-[#191B20] border border-[#282A30] text-xs font-mono text-[#A1A1AA] hover:text-[#F4F4F5]"
-              >
-                1
-              </button>
-            )}
-
-            <span className="px-3 py-1.5 rounded-lg bg-[#F4B860] text-[#101114] text-xs font-bold font-mono">
-              {page}
-            </span>
-
-            {page < totalPages - 2 && (
-              <button
-                onClick={() => setPage(totalPages)}
-                className="px-2.5 py-1.5 rounded-lg bg-[#191B20] border border-[#282A30] text-xs font-mono text-[#A1A1AA] hover:text-[#F4F4F5]"
-              >
-                {totalPages}
-              </button>
-            )}
-
-            <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#191B20] border border-[#282A30] text-xs font-medium text-[#F4F4F5] hover:bg-[#21242B] disabled:opacity-40 disabled:cursor-not-allowed transition-standard"
-            >
-              Next <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Side-by-Side Movie Comparison Modal */}
-      {comparisonModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
-          onClick={() => setComparisonModalOpen(false)}
-        >
-          <div
-            className="w-full max-w-5xl rounded-2xl bg-[#191B20] border border-[#3A3D46] shadow-2xl p-6 overflow-hidden max-h-[90vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-4 border-b border-[#282A30]">
-              <div className="flex items-center gap-2">
-                <Columns2 className="w-5 h-5 text-[#2DD4BF]" />
-                <h2 className="text-lg font-bold text-[#F4F4F5]">
-                  Multi-Movie Analytics Comparison
-                </h2>
-                <span className="text-xs px-2 py-0.5 rounded bg-[#2DD4BF]/10 text-[#2DD4BF] border border-[#2DD4BF]/30 font-mono">
-                  {selectedForCompare.length} Movies Selected
-                </span>
-              </div>
-              <button
-                onClick={() => setComparisonModalOpen(false)}
-                className="p-1.5 rounded-lg text-[#A1A1AA] hover:text-[#F4F4F5] hover:bg-[#21242B]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {comparisonLoading ? (
-              <div className="py-16">
-                <LoadingSpinner text="Running side-by-side comparative rating analysis..." />
-              </div>
-            ) : comparisonData ? (
-              <div className="overflow-y-auto py-4 space-y-6 flex-1 pr-1">
-                {/* Comparison Summary Banner */}
-                <div className="rounded-xl bg-[#14161B] border border-[#282A30] p-4 text-xs text-[#D4D4D8] leading-relaxed">
-                  <span className="font-semibold text-[#F4B860] block mb-1">Comparative Insights:</span>
-                  {comparisonData.analysisSummary}
-                  {comparisonData.commonGenres.length > 0 && (
-                    <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[#A1A1AA]">
-                      <span>Shared Genres:</span>
-                      {comparisonData.commonGenres.map(g => (
-                        <span key={g} className="px-1.5 py-0.2 rounded bg-[#282A30] text-[#2DD4BF] font-mono">
-                          {g}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Side-by-side Movie Cards */}
-                <div className={`grid grid-cols-1 md:grid-cols-${comparisonData.movies.length} gap-4`}>
-                  {comparisonData.movies.map((m) => {
-                    const distEntries = Object.entries(m.ratingDistribution || {}).map(([rating, count]) => ({
-                      rating,
-                      count
-                    }));
-                    return (
-                      <div
-                        key={m.movieId}
-                        className="rounded-xl bg-[#14161B] border border-[#282A30] p-4 flex flex-col justify-between space-y-4"
-                      >
-                        <div>
-                          <div className="flex items-start justify-between gap-2">
-                            <h3 className="font-bold text-sm text-[#F4F4F5] line-clamp-2">
-                              {m.title}
-                            </h3>
-                          </div>
-                          <p className="text-[11px] text-[#A1A1AA] mt-1">{m.genres}</p>
-                          <div className="flex items-center gap-2 mt-2">
-                            {m.imdbUrl && (
-                              <a
-                                href={m.imdbUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#282A30] text-[#F4B860] hover:bg-[#3A3D46]"
-                              >
-                                IMDb ↗
-                              </a>
-                            )}
-                            {m.tmdbUrl && (
-                              <a
-                                href={m.tmdbUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#282A30] text-[#2DD4BF] hover:bg-[#3A3D46]"
-                              >
-                                TMDb ↗
-                              </a>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Metric Columns */}
-                        <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-[#282A30]">
-                          <div>
-                            <span className="text-[10px] text-[#A1A1AA] block">Rating Volume</span>
-                            <span className="font-mono font-bold text-[#F4F4F5]">
-                              {m.ratingCount?.toLocaleString()}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-[10px] text-[#A1A1AA] block">Audience Mean</span>
-                            <span className="font-mono font-bold text-[#F4B860]">
-                              {m.avgRating?.toFixed(2)} ★
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-[10px] text-[#A1A1AA] block">Bayesian WR</span>
-                            <span className="font-mono font-bold text-[#2DD4BF]">
-                              {m.weightedRating?.toFixed(2)} ★
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-[10px] text-[#A1A1AA] block">Volume Rank</span>
-                            <span className="font-mono text-[#D4D4D8]">
-                              #{m.rankMostRated ?? '—'}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Per-movie 0.5-5.0 Star Distribution */}
-                        <div className="pt-2 border-t border-[#282A30]">
-                          <span className="text-[10px] font-semibold text-[#A1A1AA] uppercase tracking-wider block mb-2">
-                            Actual Half-Star Breakdown:
-                          </span>
-                          <div className="h-28 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <BarChart data={distEntries} margin={{ top: 0, right: 0, left: -25, bottom: 0 }}>
-                                <XAxis dataKey="rating" stroke="#646A84" fontSize={9} tickLine={false} />
-                                <YAxis stroke="#646A84" fontSize={9} tickLine={false} />
-                                <Tooltip
-                                  contentStyle={{
-                                    backgroundColor: '#191B20',
-                                    border: '1px solid #3A3D46',
-                                    fontSize: '11px',
-                                    color: '#F4F4F5'
-                                  }}
-                                  formatter={(val: any) => [`${val} reviews`, 'Count']}
-                                />
-                                <Bar dataKey="count" fill="#F4B860" radius={[2, 2, 0, 0]} />
-                              </BarChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="pt-4 border-t border-[#282A30] flex justify-between items-center text-xs">
-              <button
-                onClick={() => setSelectedForCompare([])}
-                className="text-[#A1A1AA] hover:text-[#F4F4F5]"
-              >
-                Clear Selection
-              </button>
-              <button
-                onClick={() => setComparisonModalOpen(false)}
-                className="px-4 py-2 rounded-lg bg-[#282A30] hover:bg-[#3A3D46] text-[#F4F4F5] font-semibold"
-              >
-                Close Comparison
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Single Movie Inspection Drawer */}
-      {selectedMovieId !== null && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-end bg-black/60 backdrop-blur-sm animate-fade-in"
-          onClick={() => setSelectedMovieId(null)}
-        >
-          <div
-            className="w-full max-w-lg h-full bg-[#191B20] border-l border-[#3A3D46] shadow-2xl p-6 overflow-y-auto flex flex-col justify-between"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div>
-              <div className="flex items-center justify-between pb-4 border-b border-[#282A30]">
-                <div className="flex items-center gap-2">
-                  <Film className="w-5 h-5 text-[#F4B860]" />
-                  <span className="text-xs font-mono font-semibold text-[#F4B860] uppercase">
-                    Movie Analytics Card
-                  </span>
-                </div>
-                <button
-                  onClick={() => setSelectedMovieId(null)}
-                  className="p-1.5 rounded-lg text-[#A1A1AA] hover:text-[#F4F4F5] hover:bg-[#21242B]"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {detailLoading ? (
-                <div className="py-20">
-                  <LoadingSpinner text="Loading detailed rating distribution..." />
-                </div>
-              ) : movieDetail ? (
-                <div className="space-y-6 pt-4">
-                  {/* Title & Metadata */}
-                  <div>
-                    <h2 className="text-xl font-bold text-[#F4F4F5] leading-snug">
-                      {movieDetail.title}
-                    </h2>
-                    <div className="flex flex-wrap items-center gap-2 mt-2">
-                      {movieDetail.year && (
-                        <span className="text-xs px-2 py-0.5 rounded bg-[#14161B] text-[#D4D4D8] border border-[#282A30] font-mono">
-                          Year: {movieDetail.year}
-                        </span>
-                      )}
-                      <span className="text-xs px-2 py-0.5 rounded bg-[#14161B] text-[#A1A1AA] border border-[#282A30]">
-                        ID: {movieDetail.movieId}
-                      </span>
-                      {movieDetail.isHiddenGem && (
-                        <span className="text-xs px-2 py-0.5 rounded bg-[#2DD4BF]/10 text-[#2DD4BF] border border-[#2DD4BF]/30 font-semibold">
-                          Hidden Gem
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Genres */}
-                  <div className="space-y-1.5">
-                    <span className="text-xs text-[#A1A1AA] uppercase tracking-wider font-semibold block">
-                      Genres
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {movieDetail.genreList.map((g) => (
-                        <span
-                          key={g}
-                          className="text-xs px-2.5 py-1 rounded-md bg-[#14161B] border border-[#282A30] text-[#F4F4F5]"
-                        >
-                          {g}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Primary Metrics Grid */}
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 rounded-lg bg-[#14161B] border border-[#282A30]">
-                      <span className="text-[#A1A1AA] text-[11px] block">Audience Average</span>
-                      <span className="text-xl font-bold font-mono text-[#F4B860]">
-                        {movieDetail.avgRating !== null ? `${movieDetail.avgRating.toFixed(2)} ★` : '—'}
-                      </span>
-                    </div>
-
-                    <div className="p-3 rounded-lg bg-[#14161B] border border-[#282A30]">
-                      <span className="text-[#A1A1AA] text-[11px] block">Total Ratings</span>
-                      <span className="text-xl font-bold font-mono text-[#F4F4F5]">
-                        {movieDetail.ratingCount.toLocaleString()}
-                      </span>
-                    </div>
-
-                    <div className="p-3 rounded-lg bg-[#14161B] border border-[#282A30]">
-                      <span className="text-[#A1A1AA] text-[11px] block">Bayesian Score (WR)</span>
-                      <span className="text-xl font-bold font-mono text-[#2DD4BF]">
-                        {movieDetail.weightedRating !== null ? `${movieDetail.weightedRating.toFixed(2)} ★` : '—'}
-                      </span>
-                    </div>
-
-                    <div className="p-3 rounded-lg bg-[#14161B] border border-[#282A30]">
-                      <span className="text-[#A1A1AA] text-[11px] block">Volume Ranking</span>
-                      <span className="text-xl font-bold font-mono text-[#D4D4D8]">
-                        #{movieDetail.rankMostRated ?? '—'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Actual Half-Star Rating Distribution */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-[#A1A1AA] uppercase tracking-wider font-semibold">
-                        Rating Distribution (0.5 to 5.0)
-                      </span>
-                      <span className="text-[11px] font-mono text-[#A1A1AA]">
-                        From ratings.csv
-                      </span>
-                    </div>
-
-                    <div className="h-44 w-full p-2 rounded-xl bg-[#14161B] border border-[#282A30]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={Object.entries(movieDetail.ratingDistribution || {}).map(([rating, count]) => ({
-                            rating,
-                            count
-                          }))}
-                          margin={{ top: 10, right: 10, left: -20, bottom: 5 }}
-                        >
-                          <XAxis dataKey="rating" stroke="#646A84" fontSize={10} tickLine={false} />
-                          <YAxis stroke="#646A84" fontSize={10} tickLine={false} />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: '#191B20',
-                              border: '1px solid #3A3D46',
-                              fontSize: '11px',
-                              color: '#F4F4F5'
-                            }}
-                            formatter={(val: any) => [`${val} reviews`, 'Count']}
-                          />
-                          <Bar dataKey="count" fill="#F4B860" radius={[3, 3, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {/* Viva Voce Bayesian Mathematical Explanation */}
-                  {movieDetail.bayesianFormula && (
-                    <div className="p-4 rounded-xl bg-[#14161B] border border-[#282A30] text-xs space-y-2">
-                      <span className="font-semibold text-[#F4B860] flex items-center gap-1.5">
-                        <Award className="w-3.5 h-3.5" />
-                        Viva Voce: Bayesian Shrinkage Formula
-                      </span>
-                      <div className="font-mono text-[11px] bg-[#101114] p-2.5 rounded-lg border border-[#282A30] text-[#D4D4D8] overflow-x-auto">
-                        WR = (v / (v + m)) * R + (m / (v + m)) * C
-                      </div>
-                      <div className="text-[11px] text-[#A1A1AA] space-y-1">
-                        <div>
-                          • <strong className="text-[#F4F4F5]">v (Votes):</strong> {movieDetail.bayesianFormula.v}
-                        </div>
-                        <div>
-                          • <strong className="text-[#F4F4F5]">m (Prior Weight):</strong> {movieDetail.bayesianFormula.m}
-                        </div>
-                        <div>
-                          • <strong className="text-[#F4F4F5]">R (Movie Avg):</strong> {movieDetail.bayesianFormula.R?.toFixed(2)}
-                        </div>
-                        <div>
-                          • <strong className="text-[#F4F4F5]">C (Global Mean):</strong> {movieDetail.bayesianFormula.C?.toFixed(2)}
-                        </div>
-                      </div>
-                      <p className="text-[10px] text-[#A1A1AA] pt-1 border-t border-[#282A30] leading-relaxed">
-                        Prevents movies with only 1 or 2 perfect reviews from unfairly outranking established cinema classics with hundreds of ratings.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* External Links */}
-                  <div className="flex items-center gap-3 pt-2">
-                    {movieDetail.imdbUrl && (
-                      <a
-                        href={movieDetail.imdbUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 rounded-lg bg-[#282A30] hover:bg-[#3A3D46] text-[#F4B860] font-semibold text-xs transition-standard"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        IMDb Title Page
-                      </a>
-                    )}
-                    {movieDetail.tmdbUrl && (
-                      <a
-                        href={movieDetail.tmdbUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 rounded-lg bg-[#282A30] hover:bg-[#3A3D46] text-[#2DD4BF] font-semibold text-xs transition-standard"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        TheMovieDB Page
-                      </a>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="pt-4 border-t border-[#282A30]">
-              <button
-                onClick={() => setSelectedMovieId(null)}
-                className="w-full py-2 rounded-lg bg-[#282A30] hover:bg-[#3A3D46] text-[#F4F4F5] text-xs font-semibold transition-standard"
-              >
-                Close Inspector
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <MovieDetailDrawer movieId={detailId} onClose={() => setDetailId(null)} />
+      <MovieCompareDialog
+        open={compareOpen}
+        movieIds={selectedIds}
+        onClose={() => setCompareOpen(false)}
+        onClearSelection={() => setSelected([])}
+      />
     </div>
   );
 }

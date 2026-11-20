@@ -1,7 +1,6 @@
 import {
   OverviewData,
   PaginatedMovies,
-  MovieSummary,
   MovieDetail,
   MovieComparisonResponse,
   GenreStats,
@@ -15,7 +14,37 @@ import {
   PartitionOutputPreview
 } from './types';
 
+import { apiStatus } from './apiStatus';
+
 const API_BASE = '';
+
+/** A failed API request. `status` is missing when no response arrived at all. */
+export class ApiError extends Error {
+  status?: number;
+  /** The `detail` text FastAPI sends with an error, when there is one. */
+  detail?: string;
+
+  constructor(message: string, status?: number, detail?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+/** True when the failure means the API could not be reached, as opposed to a rejected request. */
+export function isUnreachable(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === undefined || [502, 503, 504].includes(error.status));
+}
+
+const readDetail = (body: string): string | undefined => {
+  try {
+    const detail = JSON.parse(body)?.detail;
+    return typeof detail === 'string' ? detail : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 async function request<T>(
   endpoint: string,
@@ -31,19 +60,50 @@ async function request<T>(
     });
   }
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      'Accept': 'application/json'
-    },
-    signal
-  });
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      headers: {
+        'Accept': 'application/json'
+      },
+      signal
+    });
+  } catch (error) {
+    // A cancelled request says nothing about the API.
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    apiStatus.report({ state: 'unreachable', at: Date.now(), detail: 'No response' });
+    throw new ApiError('API unreachable: no response');
+  }
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => '');
-    throw new Error(`API ${res.status}: ${res.statusText || errorBody || 'Request failed'}`);
+    const label = `${res.status}${res.statusText ? ` ${res.statusText}` : ''}`;
+    if ([502, 503, 504].includes(res.status)) {
+      apiStatus.report({ state: 'unreachable', at: Date.now(), detail: label });
+    } else if (res.status >= 500) {
+      apiStatus.report({ state: 'error', at: Date.now(), detail: label });
+    } else {
+      // The API answered; it just rejected this request.
+      apiStatus.report({ state: 'connected', at: Date.now() });
+    }
+    throw new ApiError(
+      `API ${res.status}: ${res.statusText || errorBody || 'Request failed'}`,
+      res.status,
+      readDetail(errorBody)
+    );
   }
 
-  return res.json();
+  let data: T;
+  try {
+    data = await res.json();
+  } catch {
+    // A 200 that is not JSON (for example a static host's fallback page) is not a working API.
+    apiStatus.report({ state: 'unreachable', at: Date.now(), detail: 'Response was not JSON' });
+    throw new ApiError('API unreachable: the response was not JSON');
+  }
+
+  apiStatus.report({ state: 'connected', at: Date.now() });
+  return data;
 }
 
 export const api = {
