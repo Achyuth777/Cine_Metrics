@@ -6,6 +6,7 @@ import { EmptyState, ErrorState, LoadingSpinner } from '../components/LoadingSta
 import BarList from '../components/system/BarList';
 import Metric from '../components/system/Metric';
 import PageHeader from '../components/system/PageHeader';
+import ScrollHint from '../components/system/ScrollHint';
 import { buttonClass } from '../components/system/buttonClass';
 import { useQuery } from '../hooks/useQuery';
 import { PRIOR_WEIGHT } from '../lib/bayesPull';
@@ -142,6 +143,7 @@ function HiddenGems() {
         {gems.status === 'ready' && gems.data.length === 0 && (
           <EmptyState title="No films match" message="Lower the minimum average, or widen the range of ratings." />
         )}
+        {gems.status === 'ready' && gems.data.length > 0 && <ScrollHint className="mb-2" />}
         {gems.status === 'ready' && gems.data.length > 0 && (
           <div className="relative overflow-x-auto" role="region" aria-label="Hidden gems, scrollable table" tabIndex={0}>
             <table className="w-full min-w-[36rem] text-left text-sm">

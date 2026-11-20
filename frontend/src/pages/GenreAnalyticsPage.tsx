@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { api } from '../api';
 import { ErrorState, LoadingSpinner } from '../components/LoadingState';
 import PageHeader from '../components/system/PageHeader';
+import ScrollHint from '../components/system/ScrollHint';
 import { buttonClass } from '../components/system/buttonClass';
 import { useQuery } from '../hooks/useQuery';
 import { explorerPath } from '../lib/explorerParams';
@@ -150,6 +151,7 @@ export default function GenreAnalyticsPage() {
           })}
         </div>
 
+        {rows.length > 0 && <ScrollHint>Swipe the table sideways for films, ratings per film and averages.</ScrollHint>}
         {rows.length === 0 ? (
           <p className="rounded-panel border border-dashed border-line-strong px-6 py-10 text-center text-sm text-ink-2">
             No genre has that many films. Choose a lower minimum.

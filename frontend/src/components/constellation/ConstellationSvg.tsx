@@ -2,6 +2,7 @@ import { memo, useId, useMemo, type MouseEvent } from 'react';
 import {
   BOX,
   createProjector,
+  keepInside,
   labelOffset,
   type ConstellationModel,
   type Projected,
@@ -58,7 +59,9 @@ function layOut(model: ConstellationModel, width: number, height: number): Layou
     labels: model.labels.map((label) => {
       const at = project(label.position);
       const offset = labelOffset(label);
-      return { text: label.text, x: at.x + offset.x, y: at.y + offset.y, align: offset.align, title: !!label.title };
+      const title = !!label.title;
+      // Phones are narrow: keep every label inside the chart instead of clipping it at the edge.
+      return { text: label.text, x: keepInside(at.x + offset.x, offset.align, label.text, title, width), y: at.y + offset.y, align: offset.align, title };
     })
   };
 }

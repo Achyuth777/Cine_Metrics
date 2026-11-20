@@ -203,3 +203,16 @@ export function createProjector(width: number, height: number): (point: Vec3) =>
     };
   };
 }
+
+/**
+ * Moves a label's anchor so its text stays inside a chart `width` pixels wide.
+ * Text width is estimated at the labels' 11px size (about 6.4px per character
+ * for titles, 6px for tick values), with a 4px margin.
+ */
+export function keepInside(x: number, align: 'center' | 'left' | 'right', text: string, title: boolean, width: number): number {
+  const estimate = text.length * (title ? 6.4 : 6);
+  const margin = 4;
+  if (align === 'left') return Math.max(margin, Math.min(x, width - margin - estimate));
+  if (align === 'right') return Math.min(width - margin, Math.max(x, margin + estimate));
+  return Math.max(margin + estimate / 2, Math.min(x, width - margin - estimate / 2));
+}

@@ -5,6 +5,7 @@ import { ErrorState, LoadingSpinner } from '../components/LoadingState';
 import BarList from '../components/system/BarList';
 import Metric from '../components/system/Metric';
 import PageHeader from '../components/system/PageHeader';
+import ScrollHint from '../components/system/ScrollHint';
 import { useQuery } from '../hooks/useQuery';
 import { DEFAULT_MIN_COUNT, explorerPath, explorerSearchPath } from '../lib/explorerParams';
 import { describeError, formatCount, formatScore, titleWithoutYear } from '../lib/format';
@@ -179,6 +180,7 @@ export default function OverviewPage() {
             Films with at least {DEFAULT_MIN_COUNT} ratings. The adjusted score weighs each average by how many people
             rated the film, so a handful of perfect scores cannot top the list.
           </p>
+          <ScrollHint className="mb-2">Swipe the table sideways for the adjusted score.</ScrollHint>
           <TopFilms />
           <Link to={explorerPath({})} className={`${TEXT_LINK} mt-4`}>
             See the full ranking
