@@ -198,10 +198,17 @@ def test_hadoop_status_and_jobs():
     assert jobs_resp.status_code == 200
     jobs_data = jobs_resp.json()
     jobs_list = jobs_data["jobs"] if isinstance(jobs_data, dict) else jobs_data
-    assert len(jobs_list) >= 7
-    job_names = [j["jobName"] for j in jobs_list]
-    assert any("Average" in j for j in job_names)
-    assert any("Genre" in j for j in job_names)
+
+    # The endpoint must report exactly the recorded runs and never invent any.
+    # data/processed/jobs.json is git-ignored, so a clean clone has no record:
+    # then the list is empty and the note says why.
+    recorded = [j for j in data_loader.provenance_info.get("jobs", []) if isinstance(j, dict)]
+    assert len(jobs_list) == len(recorded)
+    if recorded:
+        job_names = [j["jobName"] for j in jobs_list]
+        assert job_names == [j.get("jobName", "MapReduce Job") for j in recorded]
+    else:
+        assert jobs_data["note"]
 
 
 def test_partition_output_preview():
